@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
 	"github.com/ziegenbeinmarius/theatrico/internal/script"
 	"github.com/ziegenbeinmarius/theatrico/internal/session"
 	ws "github.com/ziegenbeinmarius/theatrico/internal/ws"
@@ -44,6 +45,16 @@ type positionUpdate struct {
 }
 
 func main() {
+	for _, envPath := range []string{".env", "../../.env"} {
+		err := godotenv.Overload(envPath)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			log.Printf("warning: could not load %s: %v", envPath, err)
+		}
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -72,6 +83,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
+			log.Printf("%s %s: method not allowed", r.Method, r.URL.Path)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -89,6 +101,7 @@ func main() {
 			srv.handleGetSession(w, r, code)
 			return
 		}
+		log.Printf("%s %s: not found", r.Method, r.URL.Path)
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
@@ -104,6 +117,7 @@ func main() {
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessions.Create()
 	if err != nil {
+		log.Printf("%s %s: create session failed: %v", r.Method, r.URL.Path, err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -112,12 +126,16 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		QRUrl:    fmt.Sprintf("http://%s/join/%s", s.host, sess.JoinCode),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("%s %s: encode create session response failed: %v", r.Method, r.URL.Path, err)
+	}
+	log.Printf("%s %s: session created join_code=%s", r.Method, r.URL.Path, sess.JoinCode)
 }
 
 func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(strings.ToUpper(code))
 	if !ok {
+		log.Printf("%s %s: session not found join_code=%s", r.Method, r.URL.Path, strings.ToUpper(code))
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -126,12 +144,15 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 		Script:   sess.Script,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("%s %s: encode session response failed: %v", r.Method, r.URL.Path, err)
+	}
 }
 
 func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(strings.ToUpper(code))
 	if !ok {
+		log.Printf("%s %s: websocket session not found join_code=%s", r.Method, r.URL.Path, strings.ToUpper(code))
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

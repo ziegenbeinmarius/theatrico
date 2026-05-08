@@ -16,11 +16,15 @@ export function OperatorPage() {
     setError('');
     try {
       const res = await fetch('/api/sessions', { method: 'POST' });
-      if (!res.ok) throw new Error('server error');
+      if (!res.ok) {
+        const message = (await res.text()).trim();
+        throw new Error(message || `server error (${res.status})`);
+      }
       const data = await res.json() as CreateResponse;
       setSession(data);
-    } catch {
-      setError('Failed to create session.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create session.';
+      setError(`Failed to create session: ${message}`);
     } finally {
       setLoading(false);
     }
