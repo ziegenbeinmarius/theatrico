@@ -20,7 +20,7 @@ func TestTranscribeSuppressesNoSpeechSegment(t *testing.T) {
 		},
 	})
 
-	text, err := rec.Transcribe([]byte("audio"), "webm", "en")
+	text, err := rec.Transcribe([]byte("audio"), "webm", "en", "")
 	if err != nil {
 		t.Fatalf("Transcribe returned error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestTranscribeSuppressesUncertainCommonSilenceHallucination(t *testing.T) {
 		},
 	})
 
-	text, err := rec.Transcribe([]byte("audio"), "webm", "en")
+	text, err := rec.Transcribe([]byte("audio"), "webm", "en", "")
 	if err != nil {
 		t.Fatalf("Transcribe returned error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestTranscribeKeepsConfidentSpeech(t *testing.T) {
 		},
 	})
 
-	text, err := rec.Transcribe([]byte("audio"), "webm", "en")
+	text, err := rec.Transcribe([]byte("audio"), "webm", "en", "")
 	if err != nil {
 		t.Fatalf("Transcribe returned error: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestTranscribeRequestsVerboseJSON(t *testing.T) {
 	rec := New("test-key")
 	rec.endpoint = server.URL
 
-	if _, err := rec.Transcribe([]byte("audio"), "webm", "en"); err != nil {
+	if _, err := rec.Transcribe([]byte("audio"), "webm", "en", ""); err != nil {
 		t.Fatalf("Transcribe returned error: %v", err)
 	}
 	if !checked {

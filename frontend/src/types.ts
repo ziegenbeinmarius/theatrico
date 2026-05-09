@@ -40,6 +40,12 @@ export interface PlayInfo {
   title: string;
 }
 
+export interface PlayDetail {
+  id: string;
+  title: string;
+  script: Script;
+}
+
 export interface PositionUpdate {
   type: 'position_update';
   act: number;

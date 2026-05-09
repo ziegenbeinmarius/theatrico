@@ -23,7 +23,6 @@ The server listens on `http://localhost:8080` by default.
 | Variable | Default | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | *(required for audio)* | OpenAI API key for Whisper speech-to-text |
-| `WHISPER_CHUNK_DURATION` | `7` | Seconds of audio buffered before sending to Whisper |
 | `PORT` | `8080` | HTTP port |
 | `HOST` | `localhost:{PORT}` | Public host used in QR join URLs |
 | `SCRIPT_PATH` | `scripts/default.md` | Markdown script path |

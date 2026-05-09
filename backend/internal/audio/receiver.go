@@ -32,12 +32,15 @@ type errorMsg struct {
 // to run the fuzzy matcher and broadcast a position_update if needed.
 type OnTranscript func(text string)
 
+// ScriptContext returns the upcoming script text Whisper should expect.
+type ScriptContext func() string
+
 // HandleOperatorAudio upgrades the connection to WebSocket, buffers incoming
 // binary audio frames, and flushes to Whisper every chunkDuration.
 // Transcripts are sent back to the operator connection, broadcast to the hub,
 // and also delivered to onTranscript (which wires into the fuzzy matcher).
 // language is an optional ISO-639-1 code passed to Whisper; empty means auto-detect.
-func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, language string, onTranscript OnTranscript) {
+func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, language string, scriptContext ScriptContext, onTranscript OnTranscript) {
 	audioFormat := audioFormatFromRequest(r)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -49,6 +52,8 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 	var buf []byte
 	var initSegment []byte
 	var writeMu sync.Mutex
+	var promptMu sync.Mutex
+	var rollingPrompt string
 	ticker := time.NewTicker(chunkDuration)
 	defer ticker.Stop()
 
@@ -79,7 +84,7 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 		}
 	}()
 
-	flush := func(data []byte, initSegment []byte) {
+	flush := func(data []byte, initSegment []byte, prompt string) {
 		if len(data) == 0 {
 			return
 		}
@@ -94,7 +99,7 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			payload = append(append(make([]byte, 0, len(localInit)+len(data)), localInit...), data...)
 		}
 
-		text, err := rec.Transcribe(payload, audioFormat, language)
+		text, err := rec.Transcribe(payload, audioFormat, language, prompt)
 		if err != nil {
 			log.Printf("transcribe error format=%s: %v", audioFormat, err)
 			writeJSON(conn, &writeMu, errorMsg{
@@ -106,12 +111,53 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 		if text == "" {
 			return
 		}
+
+		promptMu.Lock()
+		combined := rollingPrompt + " " + text
+		if len(combined) > 400 {
+			combined = combined[len(combined)-400:]
+		}
+		rollingPrompt = strings.TrimSpace(combined)
+		promptMu.Unlock()
+
 		msg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: text})
 		writeMessage(conn, &writeMu, msg)
 		hub.Broadcast(sessionID, msg)
 		if onTranscript != nil {
 			onTranscript(text)
 		}
+	}
+
+	buildPrompt := func() string {
+		promptMu.Lock()
+		rolling := rollingPrompt
+		promptMu.Unlock()
+
+		const rollingMax = 150
+		if len(rolling) > rollingMax {
+			rolling = rolling[len(rolling)-rollingMax:]
+		}
+
+		scriptLines := ""
+		if scriptContext != nil {
+			scriptLines = scriptContext()
+		}
+
+		if scriptLines == "" {
+			return strings.TrimSpace(rolling)
+		}
+		const totalMax = 400
+		available := totalMax - len(rolling) - 1
+		if available <= 0 {
+			return strings.TrimSpace(rolling)
+		}
+		if len(scriptLines) > available {
+			scriptLines = scriptLines[:available]
+		}
+		if rolling == "" {
+			return strings.TrimSpace(scriptLines)
+		}
+		return strings.TrimSpace(rolling) + " " + strings.TrimSpace(scriptLines)
 	}
 
 	for {
@@ -129,15 +175,15 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			copy(chunk, buf)
 			buf = buf[:0]
 			init := append([]byte{}, initSegment...)
-			go flush(chunk, init)
+			go flush(chunk, init, buildPrompt())
 		case <-flushNow:
 			chunk := make([]byte, len(buf))
 			copy(chunk, buf)
 			buf = buf[:0]
 			init := append([]byte{}, initSegment...)
-			go flush(chunk, init)
+			go flush(chunk, init, buildPrompt())
 		case <-done:
-			flush(buf, initSegment)
+			flush(buf, initSegment, buildPrompt())
 			return
 		}
 	}

@@ -12,6 +12,7 @@ import (
 const (
 	DefaultWindowSize = 15
 	DefaultThreshold  = 0.35
+	DefaultMaxJump    = 4
 )
 
 var nonAlpha = regexp.MustCompile(`[^a-z0-9 ]+`)
@@ -33,6 +34,7 @@ type Matcher struct {
 	cursor     int // SeqIdx of current position
 	windowSize int
 	threshold  float64
+	maxJump    int // max lines the cursor may advance in a single Match call
 }
 
 func New(lines []script.FlatLine) *Matcher {
@@ -49,10 +51,11 @@ func New(lines []script.FlatLine) *Matcher {
 		normGrams:  normGrams,
 		windowSize: DefaultWindowSize,
 		threshold:  DefaultThreshold,
+		maxJump:    DefaultMaxJump,
 	}
 }
 
-func (m *Matcher) Configure(windowSize int, threshold float64) {
+func (m *Matcher) Configure(windowSize int, threshold float64, maxJump int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if windowSize > 0 {
@@ -61,12 +64,40 @@ func (m *Matcher) Configure(windowSize int, threshold float64) {
 	if threshold > 0 {
 		m.threshold = threshold
 	}
+	if maxJump > 0 {
+		m.maxJump = maxJump
+	}
 }
 
 func (m *Matcher) GetCursor() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.cursor
+}
+
+// NextLines returns the plain text of up to n script lines starting from
+// cursor+1 (the lines not yet matched), joined with spaces.
+func (m *Matcher) NextLines(n int) string {
+	m.mu.Lock()
+	cursor := m.cursor
+	lines := m.lines
+	m.mu.Unlock()
+
+	start := cursor + 1
+	if start >= len(lines) {
+		return ""
+	}
+	end := start + n
+	if end > len(lines) {
+		end = len(lines)
+	}
+	parts := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		if t := strings.TrimSpace(lines[i].Text); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // ForcePosition sets the cursor to the given SeqIdx unconditionally.
@@ -90,6 +121,7 @@ func (m *Matcher) Match(transcript string) *MatchResult {
 	cursor := m.cursor
 	windowSize := m.windowSize
 	threshold := m.threshold
+	maxJump := m.maxJump
 	lines := m.lines
 	m.mu.Unlock()
 
@@ -116,8 +148,9 @@ func (m *Matcher) Match(transcript string) *MatchResult {
 	}
 
 	// Only advance — never go backwards. Also require the best match to be
-	// strictly ahead of the current cursor (tie at cursor = no movement).
-	if bestScore >= threshold && bestIdx > cursor {
+	// strictly ahead of the current cursor (tie at cursor = no movement) and
+	// within the max-jump limit to prevent large false-positive leaps.
+	if bestScore >= threshold && bestIdx > cursor && bestIdx-cursor <= maxJump {
 		m.mu.Lock()
 		m.cursor = bestIdx
 		m.mu.Unlock()

@@ -46,8 +46,9 @@ type server struct {
 	rec           *recognizer.Recognizer
 	host          string
 	chunkDuration time.Duration
-	matchWindow   int
+	matchWindow    int
 	matchThreshold float64
+	matchMaxJump   int
 
 	matchersMu sync.Mutex
 	matchers   map[string]*matcher.Matcher // keyed by session ID
@@ -61,7 +62,7 @@ func (s *server) sessionMatcher(sess *session.Session) *matcher.Matcher {
 		return m
 	}
 	m := matcher.New(sess.FlatLines)
-	m.Configure(s.matchWindow, s.matchThreshold)
+	m.Configure(s.matchWindow, s.matchThreshold, s.matchMaxJump)
 	s.matchers[sess.ID] = m
 	return m
 }
@@ -214,12 +215,7 @@ func main() {
 	scriptsDir := filepath.Dir(scriptPath)
 	defaultPlayID := strings.TrimSuffix(filepath.Base(scriptPath), ".md")
 
-	chunkDuration := 7 * time.Second
-	if s := os.Getenv("WHISPER_CHUNK_DURATION"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 {
-			chunkDuration = time.Duration(n) * time.Second
-		}
-	}
+	chunkDuration := 2 * time.Second
 
 	matchWindow := 0
 	if s := os.Getenv("MATCH_WINDOW_SIZE"); s != "" {
@@ -228,6 +224,10 @@ func main() {
 	matchThreshold := 0.0
 	if s := os.Getenv("MATCH_CONFIDENCE_THRESHOLD"); s != "" {
 		matchThreshold, _ = strconv.ParseFloat(s, 64)
+	}
+	matchMaxJump := 0
+	if s := os.Getenv("MATCH_MAX_JUMP"); s != "" {
+		matchMaxJump, _ = strconv.Atoi(s)
 	}
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
@@ -258,6 +258,7 @@ func main() {
 		chunkDuration:  chunkDuration,
 		matchWindow:    matchWindow,
 		matchThreshold: matchThreshold,
+		matchMaxJump:   matchMaxJump,
 		matchers:       make(map[string]*matcher.Matcher),
 	}
 
@@ -269,12 +270,17 @@ func main() {
 		}
 		srv.handleListPlays(w, r)
 	})
-	mux.HandleFunc("/api/script", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/plays/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		srv.handleGetScript(w, r)
+		id := strings.TrimPrefix(r.URL.Path, "/api/plays/")
+		if id == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		srv.handleGetPlay(w, r, id)
 	})
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -337,10 +343,21 @@ func (s *server) handleListPlays(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(items) //nolint:errcheck
 }
 
-func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
-	play := s.plays[s.defaultPlayID]
+type playDetailResponse struct {
+	ID     string         `json:"id"`
+	Title  string         `json:"title"`
+	Script *script.Script `json:"script"`
+}
+
+func (s *server) handleGetPlay(w http.ResponseWriter, r *http.Request, id string) {
+	play, ok := s.plays[id]
+	if !ok {
+		http.Error(w, "play not found", http.StatusNotFound)
+		return
+	}
+	resp := playDetailResponse{ID: play.ID, Title: play.Title, Script: play.Script}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(play.Script) //nolint:errcheck
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +421,20 @@ func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code st
 		log.Printf("ws upgrade: %v", err)
 		return
 	}
+	// Send current position before handing conn to the hub client so that
+	// audience members who join mid-session immediately see the right line.
+	if cursor := sess.Cursor(); cursor > 0 && cursor < len(sess.FlatLines) {
+		fl := sess.FlatLines[cursor]
+		if init, merr := json.Marshal(positionUpdate{
+			Type:      "position_update",
+			Act:       fl.ActIdx,
+			Scene:     fl.SceneIdx,
+			Line:      fl.ID,
+			Timestamp: time.Now(),
+		}); merr == nil {
+			conn.WriteMessage(websocket.TextMessage, init) //nolint:errcheck
+		}
+	}
 	client := ws.NewClient(s.hub, sess.ID, conn)
 	s.hub.Register(sess.ID, client)
 	go client.Run()
@@ -432,7 +463,10 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 			s.hub.Broadcast(sess.ID, update)
 		}
 	}
-	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration, sess.Language, onTranscript)
+	scriptContext := func() string {
+		return m.NextLines(3)
+	}
+	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration, sess.Language, scriptContext, onTranscript)
 }
 
 // handleOperatorWS handles the operator control websocket.
@@ -462,7 +496,23 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 		conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
 	}
 
+	sendCurrentPosition := func() {
+		cursor := sess.Cursor()
+		if cursor > 0 && cursor < len(sess.FlatLines) {
+			fl := sess.FlatLines[cursor]
+			data, _ := json.Marshal(positionUpdate{
+				Type:      "position_update",
+				Act:       fl.ActIdx,
+				Scene:     fl.SceneIdx,
+				Line:      fl.ID,
+				Timestamp: time.Now(),
+			})
+			conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
+		}
+	}
+
 	sendStatus()
+	sendCurrentPosition()
 
 	conn.SetReadLimit(4096)
 	for {
