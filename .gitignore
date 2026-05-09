@@ -1,11 +1,6 @@
-# Backend
-backend/theatrico
-backend/server
-
-# Frontend
-frontend/node_modules/
+backend/.env
+frontend/.npm-cache/
 frontend/dist/
-
-# OS
+frontend/node_modules/
+node_modules/
 .DS_Store
-.env

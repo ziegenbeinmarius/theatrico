@@ -8,18 +8,24 @@ interface UseWebSocketResult {
   lastPosition: PositionUpdate | null;
 }
 
-export function useWebSocket(sessionCode: string): UseWebSocketResult {
-  const [status, setStatus] = useState<Status>('connecting');
+export function useWebSocket(sessionCode: string | undefined): UseWebSocketResult {
+  const normalizedCode = sessionCode?.trim().toUpperCase();
+  const [status, setStatus] = useState<Status>(normalizedCode ? 'connecting' : 'disconnected');
   const [lastPosition, setLastPosition] = useState<PositionUpdate | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmounted = useRef(false);
 
   const connect = useCallback(() => {
+    if (!normalizedCode) {
+      setStatus('disconnected');
+      return;
+    }
     if (unmounted.current) return;
 
+    setStatus(status => (status === 'connected' ? 'connected' : 'connecting'));
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${window.location.host}/api/sessions/${sessionCode}/ws`;
+    const url = `${proto}://${window.location.host}/api/sessions/${normalizedCode}/ws`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
@@ -49,10 +55,11 @@ export function useWebSocket(sessionCode: string): UseWebSocketResult {
     ws.onerror = () => {
       ws.close();
     };
-  }, [sessionCode]);
+  }, [normalizedCode]);
 
   useEffect(() => {
     unmounted.current = false;
+    setLastPosition(null);
     connect();
     return () => {
       unmounted.current = true;

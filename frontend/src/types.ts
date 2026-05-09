@@ -24,6 +24,11 @@ export interface SessionInfo {
   script: Script;
 }
 
+export interface CreateSessionResponse {
+  join_code: string;
+  qr_url: string;
+}
+
 export interface PositionUpdate {
   type: 'position_update';
   act: number;

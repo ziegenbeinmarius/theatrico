@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ var upgrader = websocket.Upgrader{
 }
 
 type server struct {
+	script   *script.Script
 	sessions *session.Store
 	hub      *ws.Hub
 	host     string
@@ -66,7 +69,7 @@ func main() {
 
 	scriptPath := os.Getenv("SCRIPT_PATH")
 	if scriptPath == "" {
-		scriptPath = "scripts/example.md"
+		scriptPath = "scripts/default.md"
 	}
 
 	scr, err := script.ParseFile(scriptPath)
@@ -75,12 +78,21 @@ func main() {
 	}
 
 	srv := &server{
+		script:   scr,
 		sessions: session.NewStore(scr),
 		hub:      ws.NewHub(),
 		host:     host,
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/script", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			log.Printf("%s %s: method not allowed", r.Method, r.URL.Path)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		srv.handleGetScript(w, r)
+	})
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			log.Printf("%s %s: method not allowed", r.Method, r.URL.Path)
@@ -104,13 +116,27 @@ func main() {
 		log.Printf("%s %s: not found", r.Method, r.URL.Path)
 		http.Error(w, "not found", http.StatusNotFound)
 	})
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s: not found", r.Method, r.URL.Path)
+		http.Error(w, "not found", http.StatusNotFound)
+	})
 
-	// Serve frontend static files
-	mux.Handle("/", http.FileServer(http.Dir("../frontend/dist")))
+	frontendDist := os.Getenv("FRONTEND_DIST")
+	if frontendDist == "" {
+		frontendDist = "../frontend/dist"
+	}
+	mux.Handle("/", spaFileServer(frontendDist))
 
 	log.Printf("listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(s.script); err != nil {
+		log.Printf("%s %s: encode script response failed: %v", r.Method, r.URL.Path, err)
 	}
 }
 
@@ -166,4 +192,29 @@ func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code st
 	client := ws.NewClient(s.hub, sess.ID, conn)
 	s.hub.Register(sess.ID, client)
 	go client.Run()
+}
+
+func spaFileServer(distDir string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		cleanPath := path.Clean("/" + r.URL.Path)
+		if cleanPath != "/" {
+			filePath := filepath.Join(distDir, strings.TrimPrefix(cleanPath, "/"))
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				http.ServeFile(w, r, filePath)
+				return
+			}
+		}
+
+		indexPath := filepath.Join(distDir, "index.html")
+		if _, err := os.Stat(indexPath); err != nil {
+			http.Error(w, "frontend build not found; run npm run build in frontend", http.StatusServiceUnavailable)
+			return
+		}
+		http.ServeFile(w, r, indexPath)
+	})
 }
