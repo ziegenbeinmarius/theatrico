@@ -8,6 +8,9 @@ primary_region = 'iad'
 
 [build]
 
+[env]
+  WHISPER_CHUNK_DURATION = "7"
+
 [http_service]
   internal_port = 8080
   force_https = true
