@@ -17,6 +17,11 @@ interface AudioDevice {
   label: string;
 }
 
+interface AudioErrorMessage {
+  type: 'error';
+  message?: string;
+}
+
 const LANGUAGES: { code: string; label: string }[] = [
   { code: '', label: 'Auto-detect' },
   { code: 'en', label: 'English' },
@@ -37,6 +42,44 @@ const LANGUAGES: { code: string; label: string }[] = [
   { code: 'ar', label: 'Arabic' },
 ];
 
+const AUDIO_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
+
+function supportedAudioMimeType() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  return AUDIO_MIME_CANDIDATES.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
+}
+
+function audioWebSocketUrl(joinCode: string, mimeType: string) {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = new URL(`${proto}://${window.location.host}/api/sessions/${joinCode}/audio`);
+  if (mimeType) url.searchParams.set('mime', mimeType);
+  return url.toString();
+}
+
+function microphoneErrorMessage(err: unknown) {
+  if (err instanceof DOMException) {
+    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+      return 'Microphone permission was denied. Allow microphone access and try again.';
+    }
+    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      return 'No microphone was found on this device.';
+    }
+    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      return 'The selected microphone is already in use or could not be started.';
+    }
+    if (err.name === 'OverconstrainedError') {
+      return 'The selected microphone is no longer available. Try the default microphone.';
+    }
+  }
+  return err instanceof Error ? err.message : 'Could not access microphone.';
+}
 const VOICE_ACTIVITY_POLL_MS = 80;
 const VOICE_ACTIVITY_HOLD_MS = 450;
 const MIN_VOICE_RMS = 0.012;
@@ -55,6 +98,7 @@ export function OperatorPage() {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [streamStarting, setStreamStarting] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
   const [position, setPosition] = useState<PositionUpdate | null>(null);
   const [paused, setPaused] = useState(false);
@@ -117,20 +161,22 @@ export function OperatorPage() {
   }, [sendOperator]);
 
   const refreshDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
     try {
       const all = await navigator.mediaDevices.enumerateDevices();
       const inputs = all
         .filter(d => d.kind === 'audioinput')
         .map(d => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 6)}` }));
       setDevices(inputs);
-      if (inputs.length > 0 && !selectedDeviceId) setSelectedDeviceId(inputs[0].deviceId);
+      setSelectedDeviceId(current => current || inputs[0]?.deviceId || '');
     } catch { /* permissions not yet granted */ }
-  }, [selectedDeviceId]);
+  }, []);
 
   useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
     refreshDevices();
-    navigator.mediaDevices.addEventListener('devicechange', refreshDevices);
-    return () => navigator.mediaDevices.removeEventListener('devicechange', refreshDevices);
+    navigator.mediaDevices.addEventListener?.('devicechange', refreshDevices);
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices);
   }, [refreshDevices]);
 
   useEffect(() => {
@@ -236,55 +282,121 @@ export function OperatorPage() {
   }
 
   async function startStreaming() {
-    if (!session) return;
+    if (!session || streamStarting || streaming) return;
     setStreamError('');
+    setStreamStarting(true);
+
+    if (!window.isSecureContext) {
+      setStreamError('Microphone access requires HTTPS. Open the deployed Fly app with an https:// URL.');
+      setStreamStarting(false);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStreamError('Microphone access is not available in this browser.');
+      setStreamStarting(false);
+      return;
+    }
+
+    if (typeof MediaRecorder === 'undefined') {
+      setStreamError('Audio recording is not supported in this browser.');
+      setStreamStarting(false);
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
+        });
+      } catch (err) {
+        if (
+          selectedDeviceId &&
+          err instanceof DOMException &&
+          (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')
+        ) {
+          setSelectedDeviceId('');
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          throw err;
+        }
+      }
       refreshDevices();
       await startVoiceActivityGate(stream);
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : '';
+      const mimeType = supportedAudioMimeType();
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
 
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${window.location.host}/api/sessions/${session.join_code}/audio`);
+      const ws = new WebSocket(audioWebSocketUrl(session.join_code, recorder.mimeType || mimeType));
       audioWsRef.current = ws;
 
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data as string);
           if (msg.type === 'transcript' && msg.text) setTranscripts(prev => [...prev, msg.text as string]);
+          if (msg.type === 'error') {
+            const audioError = msg as AudioErrorMessage;
+            setStreamError(audioError.message || 'Audio transcription failed.');
+          }
         } catch { /* ignore */ }
       };
-      ws.onerror = () => stopStreaming();
+
+      ws.onerror = () => {
+        setStreamError('Could not connect to the audio stream. Check the deployed server and try again.');
+        stopStreaming();
+      };
+
+      ws.onclose = () => {
+        if (audioWsRef.current === ws) {
+          setStreamError('Audio stream connection closed.');
+          stopStreaming();
+        }
+      };
+
+      recorder.onerror = () => {
+        setStreamError('Recording failed. Try another microphone or browser.');
+        stopStreaming();
+      };
 
       ws.onopen = () => {
         recorder.ondataavailable = (e) => {
           sendGatedAudioBlob(e.data, ws);
         };
-        recorder.start(250);
-        setStreaming(true);
+        try {
+          recorder.start(250);
+          setStreaming(true);
+          setStreamStarting(false);
+        } catch (err) {
+          setStreamError(microphoneErrorMessage(err));
+          stopStreaming();
+        }
       };
     } catch (err) {
-      setStreamError(err instanceof Error ? err.message : 'Could not access microphone.');
+      stopStreaming();
+      setStreamError(microphoneErrorMessage(err));
     }
   }
 
   function stopStreaming() {
-    mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
     mediaRecorderRef.current?.stream.getTracks().forEach(t => t.stop());
     mediaRecorderRef.current = null;
+    if (audioWsRef.current) {
+      audioWsRef.current.onopen = null;
+      audioWsRef.current.onmessage = null;
+      audioWsRef.current.onerror = null;
+      audioWsRef.current.onclose = null;
+      audioWsRef.current.close();
+    }
     resetVoiceActivityGate();
     audioWsRef.current?.close();
     audioWsRef.current = null;
+    setStreamStarting(false);
     setStreaming(false);
   }
 
@@ -444,7 +556,7 @@ export function OperatorPage() {
                     <select
                       value={selectedDeviceId}
                       onChange={e => setSelectedDeviceId(e.target.value)}
-                      disabled={streaming}
+                      disabled={streaming || streamStarting}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                     >
                       {devices.length === 0 && <option value="">Default microphone</option>}
@@ -452,9 +564,11 @@ export function OperatorPage() {
                     </select>
                     <div className="flex items-center gap-3">
                       {!streaming ? (
-                        <Button onClick={startStreaming} className="gap-2">
-                          <Radio className="h-4 w-4" aria-hidden="true" />
-                          Start Streaming
+                        <Button onClick={startStreaming} className="gap-2" disabled={streamStarting}>
+                          {streamStarting
+                            ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                            : <Radio className="h-4 w-4" aria-hidden="true" />}
+                          {streamStarting ? 'Starting...' : 'Start Streaming'}
                         </Button>
                       ) : (
                         <Button variant="destructive" onClick={stopStreaming} className="gap-2">

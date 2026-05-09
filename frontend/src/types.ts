@@ -52,6 +52,11 @@ export interface TranscriptUpdate {
   text: string;
 }
 
+export interface AudioErrorUpdate {
+  type: 'error';
+  message: string;
+}
+
 export interface StatusMsg {
   type: 'status';
   cursor: number;
@@ -59,4 +64,4 @@ export interface StatusMsg {
   clients: number;
 }
 
-export type WsMessage = PositionUpdate | PausedUpdate | TranscriptUpdate | StatusMsg;
+export type WsMessage = PositionUpdate | PausedUpdate | TranscriptUpdate | AudioErrorUpdate | StatusMsg;
