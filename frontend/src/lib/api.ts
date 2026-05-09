@@ -1,4 +1,4 @@
-import { CreateSessionResponse, Script, SessionInfo } from '../types';
+import { CreateSessionResponse, PlayInfo, Script, SessionInfo } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -25,10 +25,14 @@ export function getSession(code: string) {
   return request<SessionInfo>(`/api/sessions/${code.toUpperCase()}`);
 }
 
-export function createSession(language = '') {
+export function getPlays() {
+  return request<PlayInfo[]>('/api/plays');
+}
+
+export function createSession(params: { language?: string; scriptId?: string }) {
   return request<CreateSessionResponse>('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ language }),
+    body: JSON.stringify({ language: params.language ?? '', script_id: params.scriptId ?? '' }),
   });
 }

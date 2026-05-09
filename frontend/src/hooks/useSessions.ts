@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { createSession, getScript, getSession } from '../lib/api';
+import { createSession, getPlays, getScript, getSession } from '../lib/api';
 
 export const scriptKeys = {
   all: ['script'] as const,
@@ -8,6 +8,10 @@ export const scriptKeys = {
 export const sessionKeys = {
   all: ['sessions'] as const,
   detail: (code: string) => [...sessionKeys.all, code.toUpperCase()] as const,
+};
+
+export const playKeys = {
+  all: ['plays'] as const,
 };
 
 export function useScriptQuery() {
@@ -24,6 +28,14 @@ export function useSessionQuery(code: string | undefined) {
     queryFn: () => getSession(code ?? ''),
     enabled: Boolean(code),
     retry: false,
+  });
+}
+
+export function usePlaysQuery() {
+  return useQuery({
+    queryKey: playKeys.all,
+    queryFn: getPlays,
+    staleTime: 60 * 60 * 1000,
   });
 }
 

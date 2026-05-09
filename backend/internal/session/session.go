@@ -17,6 +17,7 @@ type Session struct {
 	ID        string
 	JoinCode  string
 	Script    *script.Script
+	FlatLines []script.FlatLine
 	Language  string // ISO-639-1 code for Whisper STT; empty means auto-detect
 	CreatedAt time.Time
 
@@ -54,16 +55,12 @@ func (s *Session) SetPaused(p bool) {
 }
 
 type Store struct {
-	mu            sync.RWMutex
-	byCode        map[string]*Session
-	defaultScript *script.Script
+	mu     sync.RWMutex
+	byCode map[string]*Session
 }
 
-func NewStore(defaultScript *script.Script) *Store {
-	return &Store{
-		byCode:        make(map[string]*Session),
-		defaultScript: defaultScript,
-	}
+func NewStore() *Store {
+	return &Store{byCode: make(map[string]*Session)}
 }
 
 func generateCode() (string, error) {
@@ -78,7 +75,7 @@ func generateCode() (string, error) {
 	return string(b), nil
 }
 
-func (s *Store) Create(language string) (*Session, error) {
+func (s *Store) Create(language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -97,7 +94,8 @@ func (s *Store) Create(language string) (*Session, error) {
 	sess := &Session{
 		ID:        code,
 		JoinCode:  code,
-		Script:    s.defaultScript,
+		Script:    scr,
+		FlatLines: flatLines,
 		Language:  language,
 		CreatedAt: time.Now(),
 	}

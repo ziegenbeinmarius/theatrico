@@ -32,6 +32,12 @@ export interface CreateSessionResponse {
   join_code: string;
   qr_url: string;
   language: string;
+  script_title: string;
+}
+
+export interface PlayInfo {
+  id: string;
+  title: string;
 }
 
 export interface PositionUpdate {
