@@ -1,28 +1,35 @@
 # Theatrico
 
-Theatrico is a theater PWA for following a live script. The current sprint provides the project skeleton: a Go backend that parses Markdown scripts, creates audience sessions, and serves a React PWA that renders the script and listens for live position updates.
+Real-time theater script prompter. An operator mic captures audio, a Go backend transcribes it via the Whisper API, and pushes the current script position to audience phones showing a PWA.
 
 ## Structure
 
-- `backend/` - Go API server, script parser, sessions, and websocket hub.
-- `frontend/` - Vite React TypeScript PWA using React Query, Tailwind CSS, and shadcn-style UI primitives.
-- `AGENTS.md` - architecture and implementation notes for future agents.
+- `backend/` — Go API server, script parser, session management, WebSocket hub, audio receiver, Whisper recognizer.
+- `frontend/` — Vite React TypeScript PWA using React Query, Tailwind CSS, and shadcn-style UI primitives.
+- `AGENTS.md` — architecture and implementation notes for future agents.
 
 ## Backend
 
 ```sh
 cd backend
+export OPENAI_API_KEY=sk-...
 go run ./cmd/server
 ```
 
 The server listens on `http://localhost:8080` by default.
 
-Useful environment variables:
+### Environment variables
 
-- `PORT` - HTTP port, defaults to `8080`.
-- `HOST` - public host used for QR join URLs, defaults to `localhost:{PORT}`.
-- `SCRIPT_PATH` - Markdown script path, defaults to `scripts/default.md`.
-- `FRONTEND_DIST` - static frontend build directory, defaults to `../frontend/dist`.
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | *(required for audio)* | OpenAI API key for Whisper speech-to-text |
+| `WHISPER_CHUNK_DURATION` | `7` | Seconds of audio buffered before sending to Whisper |
+| `PORT` | `8080` | HTTP port |
+| `HOST` | `localhost:{PORT}` | Public host used in QR join URLs |
+| `SCRIPT_PATH` | `scripts/default.md` | Markdown script path |
+| `FRONTEND_DIST` | `../frontend/dist` | Static frontend build directory |
+
+You can also place a `.env` file in `backend/` or the project root.
 
 ## Frontend
 
@@ -41,11 +48,21 @@ cd frontend
 npm run build
 ```
 
-After the frontend is built, `cd backend && go run ./cmd/server` serves the PWA and API from one port.
+After building, `cd backend && go run ./cmd/server` serves the PWA and API on one port.
 
 ## API
 
-- `GET /api/script` - returns the parsed default script.
-- `POST /api/sessions` - creates a new live session and join URL.
-- `GET /api/sessions/{code}` - returns session metadata and script.
-- `GET /api/sessions/{code}/ws` - websocket endpoint for live position updates.
+- `GET /api/script` — full parsed script as JSON
+- `POST /api/sessions` — create a new session; returns `{join_code, qr_url}`
+- `GET /api/sessions/{code}` — session metadata and script
+- `WS /api/sessions/{code}/ws` — audience websocket; receives `position_update` frames
+- `WS /api/sessions/{code}/audio` — operator audio websocket; send binary chunks, receive `{"type":"transcript","text":"..."}`
+- `POST /api/sessions/{code}/simulate` — inject transcript text without audio (for testing)
+
+### Testing without a microphone
+
+```bash
+curl -X POST http://localhost:8080/api/sessions/ABC123/simulate \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"What light through yonder window breaks"}'
+```
