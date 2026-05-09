@@ -1,0 +1,7 @@
+# Keep local secrets out of Copilot context/indexing
+**/.env
+**/.env.*
+
+# Allow committed examples
+!.env.example
+!.env.*.example

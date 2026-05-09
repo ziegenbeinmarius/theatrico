@@ -95,7 +95,8 @@ func (r *Recognizer) transcribeOnce(audio []byte, format string) (string, error)
 		return "", &apiError{status: resp.StatusCode}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("whisper API status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("whisper API status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result transcriptionResponse
