@@ -29,7 +29,8 @@ type OnTranscript func(text string)
 // binary audio frames, and flushes to Whisper every chunkDuration.
 // Transcripts are sent back to the operator connection, broadcast to the hub,
 // and also delivered to onTranscript (which wires into the fuzzy matcher).
-func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, onTranscript OnTranscript) {
+// language is an optional ISO-639-1 code passed to Whisper; empty means auto-detect.
+func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, language string, onTranscript OnTranscript) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("audio ws upgrade: %v", err)
@@ -68,7 +69,7 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			payload = append(append(make([]byte, 0, len(webmInit)+len(data)), webmInit...), data...)
 		}
 
-		text, err := rec.Transcribe(payload, "webm")
+		text, err := rec.Transcribe(payload, "webm", language)
 		if err != nil {
 			log.Printf("transcribe error: %v", err)
 			return

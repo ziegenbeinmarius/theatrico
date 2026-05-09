@@ -25,6 +25,10 @@ export function getSession(code: string) {
   return request<SessionInfo>(`/api/sessions/${code.toUpperCase()}`);
 }
 
-export function createSession() {
-  return request<CreateSessionResponse>('/api/sessions', { method: 'POST' });
+export function createSession(language = '') {
+  return request<CreateSessionResponse>('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language }),
+  });
 }

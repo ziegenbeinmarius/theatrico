@@ -17,6 +17,7 @@ type Session struct {
 	ID        string
 	JoinCode  string
 	Script    *script.Script
+	Language  string // ISO-639-1 code for Whisper STT; empty means auto-detect
 	CreatedAt time.Time
 
 	mu     sync.Mutex
@@ -77,7 +78,7 @@ func generateCode() (string, error) {
 	return string(b), nil
 }
 
-func (s *Store) Create() (*Session, error) {
+func (s *Store) Create(language string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -97,6 +98,7 @@ func (s *Store) Create() (*Session, error) {
 		ID:        code,
 		JoinCode:  code,
 		Script:    s.defaultScript,
+		Language:  language,
 		CreatedAt: time.Now(),
 	}
 	s.byCode[code] = sess

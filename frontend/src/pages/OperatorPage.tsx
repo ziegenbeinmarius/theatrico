@@ -17,6 +17,26 @@ interface AudioDevice {
   label: string;
 }
 
+const LANGUAGES: { code: string; label: string }[] = [
+  { code: '', label: 'Auto-detect' },
+  { code: 'en', label: 'English' },
+  { code: 'de', label: 'German' },
+  { code: 'fr', label: 'French' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'it', label: 'Italian' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'nl', label: 'Dutch' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'pl', label: 'Polish' },
+  { code: 'sv', label: 'Swedish' },
+  { code: 'no', label: 'Norwegian' },
+  { code: 'da', label: 'Danish' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'zh', label: 'Chinese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'ar', label: 'Arabic' },
+];
+
 export function OperatorPage() {
   const scriptQuery = useScriptQuery();
   const createSession = useCreateSessionMutation();
@@ -24,6 +44,7 @@ export function OperatorPage() {
 
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
   const [position, setPosition] = useState<PositionUpdate | null>(null);
@@ -153,7 +174,7 @@ export function OperatorPage() {
     setPosition(null);
     setPaused(false);
     setClients(0);
-    createSession.mutate();
+    createSession.mutate(selectedLanguage);
   }
 
   function handleLineClick(seqIdx: number) {
@@ -206,20 +227,50 @@ export function OperatorPage() {
                 {session ? (
                   <>
                     <QRCodeDisplay joinCode={session.join_code} url={session.qr_url} />
-                    <Button className="w-full" variant="outline" onClick={handleNewSession} disabled={createSession.isPending}>
-                      {createSession.isPending
-                        ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                        : <PlusCircle className="h-4 w-4" aria-hidden="true" />}
-                      New Session
-                    </Button>
+                    {session.language && (
+                      <p className="text-sm text-muted-foreground">
+                        Language: <span className="font-medium text-foreground">{LANGUAGES.find(l => l.code === session.language)?.label ?? session.language}</span>
+                      </p>
+                    )}
+                    <div className="space-y-3">
+                      <div>
+                        <label className="mb-1.5 block text-sm text-muted-foreground">Language for next session</label>
+                        <select
+                          value={selectedLanguage}
+                          onChange={e => setSelectedLanguage(e.target.value)}
+                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                        </select>
+                      </div>
+                      <Button className="w-full" variant="outline" onClick={handleNewSession} disabled={createSession.isPending}>
+                        {createSession.isPending
+                          ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          : <PlusCircle className="h-4 w-4" aria-hidden="true" />}
+                        New Session
+                      </Button>
+                    </div>
                   </>
                 ) : (
-                  <Button size="lg" className="w-full" onClick={handleNewSession} disabled={createSession.isPending}>
-                    {createSession.isPending
-                      ? <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
-                      : <PlusCircle className="h-5 w-5" aria-hidden="true" />}
-                    New Session
-                  </Button>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">Script language</label>
+                      <select
+                        value={selectedLanguage}
+                        onChange={e => setSelectedLanguage(e.target.value)}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                      </select>
+                      <p className="mt-1 text-xs text-muted-foreground">Sets the speech recognition language so Whisper doesn't switch unexpectedly.</p>
+                    </div>
+                    <Button size="lg" className="w-full" onClick={handleNewSession} disabled={createSession.isPending}>
+                      {createSession.isPending
+                        ? <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+                        : <PlusCircle className="h-5 w-5" aria-hidden="true" />}
+                      New Session
+                    </Button>
+                  </div>
                 )}
                 {createSession.isError && (
                   <p className="text-sm text-destructive">

@@ -55,9 +55,14 @@ func (s *server) sessionMatcher(sessID string) *matcher.Matcher {
 	return m
 }
 
+type createSessionRequest struct {
+	Language string `json:"language"`
+}
+
 type createSessionResponse struct {
 	JoinCode string `json:"join_code"`
 	QRUrl    string `json:"qr_url"`
+	Language string `json:"language"`
 }
 
 type sessionInfoResponse struct {
@@ -67,6 +72,7 @@ type sessionInfoResponse struct {
 	Paused        bool           `json:"paused"`
 	Clients       int            `json:"clients"`
 	ChunkDuration int            `json:"chunk_duration_ms"`
+	Language      string         `json:"language"`
 }
 
 type positionUpdate struct {
@@ -230,7 +236,12 @@ func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.sessions.Create()
+	var req createSessionRequest
+	if r.ContentLength > 0 {
+		json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
+	}
+
+	sess, err := s.sessions.Create(req.Language)
 	if err != nil {
 		log.Printf("create session: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -242,10 +253,11 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	resp := createSessionResponse{
 		JoinCode: sess.JoinCode,
 		QRUrl:    fmt.Sprintf("http://%s/join/%s", s.host, sess.JoinCode),
+		Language: sess.Language,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	log.Printf("session created join_code=%s", sess.JoinCode)
+	log.Printf("session created join_code=%s language=%q", sess.JoinCode, sess.Language)
 }
 
 func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code string) {
@@ -261,6 +273,7 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 		Paused:        sess.Paused(),
 		Clients:       s.hub.ClientCount(sess.ID),
 		ChunkDuration: int(s.chunkDuration.Milliseconds()),
+		Language:      sess.Language,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
@@ -305,7 +318,7 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 			s.hub.Broadcast(sess.ID, update)
 		}
 	}
-	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration, onTranscript)
+	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration, sess.Language, onTranscript)
 }
 
 // handleOperatorWS handles the operator control websocket.

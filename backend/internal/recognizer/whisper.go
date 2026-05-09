@@ -38,12 +38,13 @@ func (e *apiError) Error() string {
 
 // Transcribe sends audio bytes to the Whisper API and returns transcript text.
 // format should be the file extension, e.g. "webm" or "wav".
+// language is an optional ISO-639-1 code (e.g. "de", "en"); empty means auto-detect.
 // Retries up to 3 times on HTTP 429.
-func (r *Recognizer) Transcribe(audio []byte, format string) (string, error) {
+func (r *Recognizer) Transcribe(audio []byte, format string, language string) (string, error) {
 	const maxRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		text, err := r.transcribeOnce(audio, format)
+		text, err := r.transcribeOnce(audio, format, language)
 		if err == nil {
 			return text, nil
 		}
@@ -57,7 +58,7 @@ func (r *Recognizer) Transcribe(audio []byte, format string) (string, error) {
 	return "", lastErr
 }
 
-func (r *Recognizer) transcribeOnce(audio []byte, format string) (string, error) {
+func (r *Recognizer) transcribeOnce(audio []byte, format string, language string) (string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -70,6 +71,11 @@ func (r *Recognizer) transcribeOnce(audio []byte, format string) (string, error)
 	}
 	if err := mw.WriteField("model", "whisper-1"); err != nil {
 		return "", fmt.Errorf("write model field: %w", err)
+	}
+	if language != "" {
+		if err := mw.WriteField("language", language); err != nil {
+			return "", fmt.Errorf("write language field: %w", err)
+		}
 	}
 	mw.Close()
 

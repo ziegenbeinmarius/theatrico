@@ -25,11 +25,13 @@ export interface SessionInfo {
   cursor: number;
   paused: boolean;
   clients: number;
+  language: string;
 }
 
 export interface CreateSessionResponse {
   join_code: string;
   qr_url: string;
+  language: string;
 }
 
 export interface PositionUpdate {
