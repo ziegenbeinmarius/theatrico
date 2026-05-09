@@ -8,11 +8,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
+	"github.com/ziegenbeinmarius/theatrico/internal/audio"
+	"github.com/ziegenbeinmarius/theatrico/internal/recognizer"
 	"github.com/ziegenbeinmarius/theatrico/internal/script"
 	"github.com/ziegenbeinmarius/theatrico/internal/session"
 	ws "github.com/ziegenbeinmarius/theatrico/internal/ws"
@@ -23,10 +26,12 @@ var upgrader = websocket.Upgrader{
 }
 
 type server struct {
-	script   *script.Script
-	sessions *session.Store
-	hub      *ws.Hub
-	host     string
+	script        *script.Script
+	sessions      *session.Store
+	hub           *ws.Hub
+	rec           *recognizer.Recognizer
+	host          string
+	chunkDuration time.Duration
 }
 
 type createSessionResponse struct {
@@ -45,6 +50,15 @@ type positionUpdate struct {
 	Scene     int       `json:"scene"`
 	Line      int       `json:"line"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type simulateRequest struct {
+	Text string `json:"text"`
+}
+
+type transcriptMsg struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 func main() {
@@ -72,16 +86,27 @@ func main() {
 		scriptPath = "scripts/default.md"
 	}
 
+	chunkDuration := 7 * time.Second
+	if s := os.Getenv("WHISPER_CHUNK_DURATION"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			chunkDuration = time.Duration(n) * time.Second
+		}
+	}
+
+	apiKey := os.Getenv("OPENAI_API_KEY")
+
 	scr, err := script.ParseFile(scriptPath)
 	if err != nil {
 		log.Fatalf("parse script: %v", err)
 	}
 
 	srv := &server{
-		script:   scr,
-		sessions: session.NewStore(scr),
-		hub:      ws.NewHub(),
-		host:     host,
+		script:        scr,
+		sessions:      session.NewStore(scr),
+		hub:           ws.NewHub(),
+		rec:           recognizer.New(apiKey),
+		host:          host,
+		chunkDuration: chunkDuration,
 	}
 
 	mux := http.NewServeMux()
@@ -102,14 +127,25 @@ func main() {
 		srv.handleCreateSession(w, r)
 	})
 	mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-		parts := strings.SplitN(path, "/", 2)
-		code := parts[0]
-		if len(parts) == 2 && parts[1] == "ws" {
-			srv.handleWebSocket(w, r, code)
-			return
-		}
-		if r.Method == http.MethodGet {
+		p := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+		parts := strings.SplitN(p, "/", 2)
+		code := strings.ToUpper(parts[0])
+
+		if len(parts) == 2 {
+			switch parts[1] {
+			case "ws":
+				srv.handleWebSocket(w, r, code)
+				return
+			case "audio":
+				srv.handleAudioWS(w, r, code)
+				return
+			case "simulate":
+				if r.Method == http.MethodPost {
+					srv.handleSimulate(w, r, code)
+					return
+				}
+			}
+		} else if r.Method == http.MethodGet {
 			srv.handleGetSession(w, r, code)
 			return
 		}
@@ -159,9 +195,9 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code string) {
-	sess, ok := s.sessions.Get(strings.ToUpper(code))
+	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: session not found join_code=%s", r.Method, r.URL.Path, strings.ToUpper(code))
+		log.Printf("%s %s: session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -176,22 +212,48 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 }
 
 func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code string) {
-	sess, ok := s.sessions.Get(strings.ToUpper(code))
+	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: websocket session not found join_code=%s", r.Method, r.URL.Path, strings.ToUpper(code))
+		log.Printf("%s %s: websocket session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade: %v", err)
 		return
 	}
-
 	client := ws.NewClient(s.hub, sess.ID, conn)
 	s.hub.Register(sess.ID, client)
 	go client.Run()
+}
+
+func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code string) {
+	sess, ok := s.sessions.Get(code)
+	if !ok {
+		log.Printf("%s %s: audio ws session not found join_code=%s", r.Method, r.URL.Path, code)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration)
+}
+
+func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code string) {
+	sess, ok := s.sessions.Get(code)
+	if !ok {
+		log.Printf("%s %s: simulate session not found join_code=%s", r.Method, r.URL.Path, code)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	var req simulateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
+		http.Error(w, `invalid body — expected {"text":"..."}`, http.StatusBadRequest)
+		return
+	}
+	msg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: req.Text})
+	s.hub.Broadcast(sess.ID, msg)
+	log.Printf("%s %s: simulated transcript join_code=%s text=%q", r.Method, r.URL.Path, code, req.Text)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func spaFileServer(distDir string) http.Handler {
