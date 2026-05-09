@@ -126,6 +126,7 @@ export function OperatorPage() {
   const audioLevelDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const voiceGateReadyRef = useRef(false);
   const heardVoiceSinceLastBlobRef = useRef(false);
+  const voiceWasActiveRef = useRef(false);
   const voiceActiveUntilRef = useRef(0);
   const noiseFloorRef = useRef(0.006);
   const sentInitialAudioRef = useRef(false);
@@ -233,12 +234,20 @@ export function OperatorPage() {
 
         if (rms >= threshold) {
           heardVoiceSinceLastBlobRef.current = true;
+          voiceWasActiveRef.current = true;
           voiceActiveUntilRef.current = now + VOICE_ACTIVITY_HOLD_MS;
           return;
         }
 
         if (now > voiceActiveUntilRef.current) {
           noiseFloorRef.current = (noiseFloorRef.current * 0.95) + (rms * 0.05);
+          if (voiceWasActiveRef.current) {
+            const ws = audioWsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'flush' }));
+            }
+            voiceWasActiveRef.current = false;
+          }
         }
       }, VOICE_ACTIVITY_POLL_MS);
     } catch {
@@ -257,6 +266,7 @@ export function OperatorPage() {
     audioLevelDataRef.current = null;
     voiceGateReadyRef.current = false;
     heardVoiceSinceLastBlobRef.current = false;
+    voiceWasActiveRef.current = false;
     voiceActiveUntilRef.current = 0;
     noiseFloorRef.current = 0.006;
     sentInitialAudioRef.current = false;

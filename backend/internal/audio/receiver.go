@@ -53,6 +53,7 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 	defer ticker.Stop()
 
 	msgs := make(chan []byte, 64)
+	flushNow := make(chan struct{}, 1)
 	done := make(chan struct{})
 
 	go func() {
@@ -64,6 +65,16 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			}
 			if msgType == websocket.BinaryMessage && len(data) > 0 {
 				msgs <- data
+			} else if msgType == websocket.TextMessage {
+				var signal struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(data, &signal) == nil && signal.Type == "flush" {
+					select {
+					case flushNow <- struct{}{}:
+					default:
+					}
+				}
 			}
 		}
 	}()
@@ -114,6 +125,12 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			}
 			buf = append(buf, data...)
 		case <-ticker.C:
+			chunk := make([]byte, len(buf))
+			copy(chunk, buf)
+			buf = buf[:0]
+			init := append([]byte{}, initSegment...)
+			go flush(chunk, init)
+		case <-flushNow:
 			chunk := make([]byte, len(buf))
 			copy(chunk, buf)
 			buf = buf[:0]
