@@ -54,13 +54,20 @@ func (s *Session) SetPaused(p bool) {
 	s.paused = p
 }
 
-type Store struct {
+// Repository is the interface for session storage.
+type Repository interface {
+	Create(language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error)
+	Get(code string) (*Session, bool)
+}
+
+// MemoryStore is an in-memory implementation of Repository.
+type MemoryStore struct {
 	mu     sync.RWMutex
 	byCode map[string]*Session
 }
 
-func NewStore() *Store {
-	return &Store{byCode: make(map[string]*Session)}
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{byCode: make(map[string]*Session)}
 }
 
 func generateCode() (string, error) {
@@ -75,7 +82,7 @@ func generateCode() (string, error) {
 	return string(b), nil
 }
 
-func (s *Store) Create(language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error) {
+func (s *MemoryStore) Create(language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -103,7 +110,7 @@ func (s *Store) Create(language string, scr *script.Script, flatLines []script.F
 	return sess, nil
 }
 
-func (s *Store) Get(code string) (*Session, bool) {
+func (s *MemoryStore) Get(code string) (*Session, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sess, ok := s.byCode[code]

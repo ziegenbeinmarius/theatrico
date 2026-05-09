@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/ziegenbeinmarius/theatrico/internal/recognizer"
-	ws "github.com/ziegenbeinmarius/theatrico/internal/ws"
 )
 
 var upgrader = websocket.Upgrader{
@@ -28,6 +26,16 @@ type errorMsg struct {
 	Message string `json:"message"`
 }
 
+// Transcriber is satisfied by any type that can transcribe audio bytes to text.
+type Transcriber interface {
+	Transcribe(audio []byte, format, language, prompt string) (string, error)
+}
+
+// Broadcaster is satisfied by any type that can broadcast messages to session clients.
+type Broadcaster interface {
+	Broadcast(sessionID string, msg []byte)
+}
+
 // OnTranscript is called after a successful transcription; the caller uses this
 // to run the fuzzy matcher and broadcast a position_update if needed.
 type OnTranscript func(text string)
@@ -40,7 +48,7 @@ type ScriptContext func() string
 // Transcripts are sent back to the operator connection, broadcast to the hub,
 // and also delivered to onTranscript (which wires into the fuzzy matcher).
 // language is an optional ISO-639-1 code passed to Whisper; empty means auto-detect.
-func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, language string, scriptContext ScriptContext, onTranscript OnTranscript) {
+func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec Transcriber, hub Broadcaster, chunkDuration time.Duration, language string, scriptContext ScriptContext, onTranscript OnTranscript) {
 	audioFormat := audioFormatFromRequest(r)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
