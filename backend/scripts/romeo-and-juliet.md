@@ -38,13 +38,3 @@ Ay me, sad hours seem long.
 **FRIAR LAURENCE:** For doting, not for loving, pupil mine.
 
 **ROMEO:** Then plainly know my heart's dear love is set on Juliet.
-
-## Scene 2: A Street in Verona
-
-**MERCUTIO:** Where the devil should this Romeo be?
-
-**BENVOLIO:** Not to his father's; I spoke with his man.
-
-**MERCUTIO:** Why, that same pale hard-hearted wench torments him so.
-
-**ROMEO:** Good morrow to you both.

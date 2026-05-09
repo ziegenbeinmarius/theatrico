@@ -9,8 +9,13 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useCreateSessionMutation, usePlaysQuery, useScriptQuery } from '../hooks/useSessions';
-import { PositionUpdate, StatusMsg } from '../types';
+import {
+  useCreateSessionMutation,
+  usePlaysQuery,
+  useScriptQuery,
+  useSessionQuery,
+} from "../hooks/useSessions";
+import { PositionUpdate, StatusMsg, SessionInfo } from "../types";
 
 interface AudioDevice {
   deviceId: string;
@@ -89,11 +94,15 @@ type WebAudioWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+
 export function OperatorPage() {
   const scriptQuery = useScriptQuery();
   const playsQuery = usePlaysQuery();
   const createSession = useCreateSessionMutation();
-  const session = createSession.data;
+  const [fullSession, setFullSession] = useState<SessionInfo | null>(null);
+  const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+  const sessionQuery = useSessionQuery(pendingJoinCode ?? undefined);
+  const session = fullSession;
 
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -402,14 +411,35 @@ export function OperatorPage() {
     setStreaming(false);
   }
 
+
   function handleNewSession() {
+    if (!selectedScript) return;
     stopStreaming();
     setTranscripts([]);
     setPosition(null);
     setPaused(false);
     setClients(0);
-    createSession.mutate({ language: selectedLanguage, scriptId: selectedScript });
+    setFullSession(null);
+    setPendingJoinCode(null);
+    createSession.mutate(
+      { language: selectedLanguage, scriptId: selectedScript },
+      {
+        onSuccess: (data) => {
+          if (data && data.join_code) {
+            setPendingJoinCode(data.join_code);
+          }
+        },
+      },
+    );
   }
+
+  // When sessionQuery loads, update fullSession
+  useEffect(() => {
+    if (sessionQuery.data) {
+      setFullSession(sessionQuery.data);
+      setPendingJoinCode(null);
+    }
+  }, [sessionQuery.data]);
 
   function handleLineClick(seqIdx: number) {
     sendControl({ type: 'force_position', line: seqIdx });
@@ -430,7 +460,9 @@ export function OperatorPage() {
             <Clapperboard className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-normal">Theatrico</h1>
+            <h1 className="text-3xl font-semibold tracking-normal">
+              Theatrico
+            </h1>
             <p className="text-sm text-muted-foreground">Operator console</p>
           </div>
           {session && (
@@ -452,90 +484,103 @@ export function OperatorPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>Live session</CardTitle>
-                    <CardDescription>Create a join code for audience devices.</CardDescription>
+                    <CardDescription>
+                      Create a join code for audience devices.
+                    </CardDescription>
                   </div>
-                  <Badge variant={session ? 'secondary' : 'muted'}>{session ? 'Active' : 'Ready'}</Badge>
+                  <Badge variant={session ? "secondary" : "muted"}>
+                    {session ? "Active" : "Ready"}
+                  </Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
                 {session ? (
                   <>
-                    <QRCodeDisplay joinCode={session.join_code} url={session.qr_url} />
-                    {session.script_title && (
+                    <QRCodeDisplay joinCode={session.join_code} />
+                    {session.script?.title && (
                       <p className="text-sm text-muted-foreground">
-                        Play: <span className="font-medium text-foreground">{session.script_title}</span>
+                        Play:{" "}
+                        <span className="font-medium text-foreground">
+                          {session.script.title}
+                        </span>
                       </p>
                     )}
                     {session.language && (
                       <p className="text-sm text-muted-foreground">
-                        Language: <span className="font-medium text-foreground">{LANGUAGES.find(l => l.code === session.language)?.label ?? session.language}</span>
+                        Language:{" "}
+                        <span className="font-medium text-foreground">
+                          {LANGUAGES.find((l) => l.code === session.language)
+                            ?.label ?? session.language}
+                        </span>
                       </p>
                     )}
-                    <div className="space-y-3">
-                      <div>
-                        <label className="mb-1.5 block text-sm text-muted-foreground">Play for next session</label>
-                        <select
-                          value={selectedScript}
-                          onChange={e => setSelectedScript(e.target.value)}
-                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                          <option value="">Default play</option>
-                          {playsQuery.data?.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="mb-1.5 block text-sm text-muted-foreground">Language for next session</label>
-                        <select
-                          value={selectedLanguage}
-                          onChange={e => setSelectedLanguage(e.target.value)}
-                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                        >
-                          {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                        </select>
-                      </div>
-                      <Button className="w-full" variant="outline" onClick={handleNewSession} disabled={createSession.isPending}>
-                        {createSession.isPending
-                          ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                          : <PlusCircle className="h-4 w-4" aria-hidden="true" />}
-                        New Session
-                      </Button>
-                    </div>
                   </>
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="mb-1.5 block text-sm text-muted-foreground">Play</label>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">
+                        Play <span className="text-destructive">*</span>
+                      </label>
                       <select
                         value={selectedScript}
-                        onChange={e => setSelectedScript(e.target.value)}
+                        onChange={(e) => setSelectedScript(e.target.value)}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        <option value="">Default play</option>
-                        {playsQuery.data?.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                        <option value="" disabled>
+                          Select a play…
+                        </option>
+                        {playsQuery.data
+                          ?.filter((p) => p.id !== "default")
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.title}
+                            </option>
+                          ))}
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-sm text-muted-foreground">Script language</label>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">
+                        Script language
+                      </label>
                       <select
                         value={selectedLanguage}
-                        onChange={e => setSelectedLanguage(e.target.value)}
+                        onChange={(e) => setSelectedLanguage(e.target.value)}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                        {LANGUAGES.map((l) => (
+                          <option key={l.code} value={l.code}>
+                            {l.label}
+                          </option>
+                        ))}
                       </select>
-                      <p className="mt-1 text-xs text-muted-foreground">Sets the speech recognition language so Whisper doesn't switch unexpectedly.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Sets the speech recognition language so Whisper doesn't
+                        switch unexpectedly.
+                      </p>
                     </div>
-                    <Button size="lg" className="w-full" onClick={handleNewSession} disabled={createSession.isPending}>
-                      {createSession.isPending
-                        ? <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
-                        : <PlusCircle className="h-5 w-5" aria-hidden="true" />}
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={handleNewSession}
+                      disabled={createSession.isPending || !selectedScript}
+                    >
+                      {createSession.isPending ? (
+                        <RefreshCw
+                          className="h-5 w-5 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <PlusCircle className="h-5 w-5" aria-hidden="true" />
+                      )}
                       New Session
                     </Button>
                   </div>
                 )}
                 {createSession.isError && (
                   <p className="text-sm text-destructive">
-                    {createSession.error instanceof Error ? createSession.error.message : 'Failed to create session.'}
+                    {createSession.error instanceof Error
+                      ? createSession.error.message
+                      : "Failed to create session."}
                   </p>
                 )}
               </CardContent>
@@ -547,26 +592,39 @@ export function OperatorPage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center gap-2">
-                      <MousePointerClick className="h-5 w-5 text-secondary" aria-hidden="true" />
+                      <MousePointerClick
+                        className="h-5 w-5 text-secondary"
+                        aria-hidden="true"
+                      />
                       <CardTitle>Matcher Controls</CardTitle>
                     </div>
                     <CardDescription>
-                      Click any script line to force-jump the cursor. Pause auto-matching to take manual control.
+                      Click any script line to force-jump the cursor. Pause
+                      auto-matching to take manual control.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <Button
-                      variant={paused ? 'secondary' : 'outline'}
+                      variant={paused ? "secondary" : "outline"}
                       onClick={togglePause}
                       className="gap-2"
                     >
-                      {paused
-                        ? <><Play className="h-4 w-4" />Resume Auto-Match</>
-                        : <><Pause className="h-4 w-4" />Pause Auto-Match</>}
+                      {paused ? (
+                        <>
+                          <Play className="h-4 w-4" />
+                          Resume Auto-Match
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="h-4 w-4" />
+                          Pause Auto-Match
+                        </>
+                      )}
                     </Button>
                     {position && (
                       <p className="text-sm text-muted-foreground">
-                        Current: Act {position.act + 1} · Scene {position.scene + 1} · Line {position.line}
+                        Current: Act {position.act + 1} · Scene{" "}
+                        {position.scene + 1} · Line {position.line}
                       </p>
                     )}
                   </CardContent>
@@ -576,31 +634,55 @@ export function OperatorPage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center gap-2">
-                      <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
+                      <Mic
+                        className="h-5 w-5 text-secondary"
+                        aria-hidden="true"
+                      />
                       <CardTitle>Microphone</CardTitle>
                     </div>
-                    <CardDescription>Select input device and stream audio to Whisper.</CardDescription>
+                    <CardDescription>
+                      Select input device and stream audio to Whisper.
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <select
                       value={selectedDeviceId}
-                      onChange={e => setSelectedDeviceId(e.target.value)}
+                      onChange={(e) => setSelectedDeviceId(e.target.value)}
                       disabled={streaming || streamStarting}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                     >
-                      {devices.length === 0 && <option value="">Default microphone</option>}
-                      {devices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+                      {devices.length === 0 && (
+                        <option value="">Default microphone</option>
+                      )}
+                      {devices.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label}
+                        </option>
+                      ))}
                     </select>
                     <div className="flex items-center gap-3">
                       {!streaming ? (
-                        <Button onClick={startStreaming} className="gap-2" disabled={streamStarting}>
-                          {streamStarting
-                            ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                            : <Radio className="h-4 w-4" aria-hidden="true" />}
-                          {streamStarting ? 'Starting...' : 'Start Streaming'}
+                        <Button
+                          onClick={startStreaming}
+                          className="gap-2"
+                          disabled={streamStarting}
+                        >
+                          {streamStarting ? (
+                            <RefreshCw
+                              className="h-4 w-4 animate-spin"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <Radio className="h-4 w-4" aria-hidden="true" />
+                          )}
+                          {streamStarting ? "Starting..." : "Start Streaming"}
                         </Button>
                       ) : (
-                        <Button variant="destructive" onClick={stopStreaming} className="gap-2">
+                        <Button
+                          variant="destructive"
+                          onClick={stopStreaming}
+                          className="gap-2"
+                        >
                           <StopCircle className="h-4 w-4" aria-hidden="true" />
                           Stop Streaming
                         </Button>
@@ -615,7 +697,9 @@ export function OperatorPage() {
                         </span>
                       )}
                     </div>
-                    {streamError && <p className="text-sm text-destructive">{streamError}</p>}
+                    {streamError && (
+                      <p className="text-sm text-destructive">{streamError}</p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -625,16 +709,23 @@ export function OperatorPage() {
                     <CardTitle className="text-base">Live Transcript</CardTitle>
                     {position && (
                       <CardDescription>
-                        Act {position.act + 1} · Scene {position.scene + 1} · Line {position.line}
+                        Act {position.act + 1} · Scene {position.scene + 1} ·
+                        Line {position.line}
                       </CardDescription>
                     )}
                   </CardHeader>
                   <CardContent>
                     <div className="max-h-52 overflow-y-auto rounded-md bg-black/30 p-3 text-sm leading-relaxed">
                       {transcripts.length === 0 ? (
-                        <span className="text-muted-foreground">Transcript will appear here once streaming starts…</span>
+                        <span className="text-muted-foreground">
+                          Transcript will appear here once streaming starts…
+                        </span>
                       ) : (
-                        transcripts.map((t, i) => <p key={i} className="mb-1">{t}</p>)
+                        transcripts.map((t, i) => (
+                          <p key={i} className="mb-1">
+                            {t}
+                          </p>
+                        ))
                       )}
                       <div ref={transcriptEndRef} />
                     </div>
@@ -646,44 +737,53 @@ export function OperatorPage() {
 
           {/* Right column: script summary + script view for click-to-jump */}
           <div className="space-y-6">
-            <Card className="self-start">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <ScrollText className="h-5 w-5 text-secondary" aria-hidden="true" />
-                  <CardTitle className="text-lg">Script</CardTitle>
-                </div>
-                <CardDescription>Default script loaded from the backend parser.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {scriptQuery.isLoading && <p className="text-muted-foreground">Loading script...</p>}
-                {scriptQuery.isError && <p className="text-destructive">Script could not be loaded.</p>}
-                {scriptQuery.data && (
-                  <>
-                    <div className="flex items-center justify-between border-b border-border pb-3">
-                      <span className="text-muted-foreground">Title</span>
-                      <span className="font-medium">{scriptQuery.data.title}</span>
-                    </div>
-                    <div className="flex items-center justify-between border-b border-border pb-3">
-                      <span className="text-muted-foreground">Acts</span>
-                      <span className="font-medium">{scriptQuery.data.acts.length}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Scenes</span>
-                      <span className="font-medium">
-                        {scriptQuery.data.acts.reduce((total, act) => total + act.scenes.length, 0)}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+            {session && session.script && (
+              <Card className="self-start">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <ScrollText
+                      className="h-5 w-5 text-secondary"
+                      aria-hidden="true"
+                    />
+                    <CardTitle className="text-lg">Script</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Script loaded for this session.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <span className="text-muted-foreground">Title</span>
+                    <span className="font-medium">{session.script.title}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <span className="text-muted-foreground">Acts</span>
+                    <span className="font-medium">
+                      {session.script.acts.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Scenes</span>
+                    <span className="font-medium">
+                      {session.script.acts.reduce(
+                        (total: number, act: import("../types").ScriptAct) =>
+                          total + act.scenes.length,
+                        0,
+                      )}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Clickable script for force-jump */}
             {session && scriptQuery.data && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">Click to Jump</CardTitle>
-                  <CardDescription className="text-xs">Click a line to force the cursor there.</CardDescription>
+                  <CardDescription className="text-xs">
+                    Click a line to force the cursor there.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="max-h-[28rem] overflow-y-auto p-0">
                   <ScriptRenderer
