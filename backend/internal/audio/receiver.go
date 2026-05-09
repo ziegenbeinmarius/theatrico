@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,6 +23,11 @@ type transcriptMsg struct {
 	Text string `json:"text"`
 }
 
+type errorMsg struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
 // OnTranscript is called after a successful transcription; the caller uses this
 // to run the fuzzy matcher and broadcast a position_update if needed.
 type OnTranscript func(text string)
@@ -31,6 +38,7 @@ type OnTranscript func(text string)
 // and also delivered to onTranscript (which wires into the fuzzy matcher).
 // language is an optional ISO-639-1 code passed to Whisper; empty means auto-detect.
 func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID string, rec *recognizer.Recognizer, hub *ws.Hub, chunkDuration time.Duration, language string, onTranscript OnTranscript) {
+	audioFormat := audioFormatFromRequest(r)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("audio ws upgrade: %v", err)
@@ -39,7 +47,8 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 	defer conn.Close()
 
 	var buf []byte
-	var webmInit []byte
+	var initSegment []byte
+	var writeMu sync.Mutex
 	ticker := time.NewTicker(chunkDuration)
 	defer ticker.Stop()
 
@@ -59,26 +68,35 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 		}
 	}()
 
-	flush := func(data []byte) {
+	flush := func(data []byte, initSegment []byte) {
 		if len(data) == 0 {
 			return
 		}
 
-		payload := data
-		if !startsWithWebMHeader(data) && len(webmInit) > 0 {
-			payload = append(append(make([]byte, 0, len(webmInit)+len(data)), webmInit...), data...)
+		localInit := initSegment
+		if len(localInit) == 0 {
+			localInit = extractInitSegment(data, audioFormat)
 		}
 
-		text, err := rec.Transcribe(payload, "webm", language)
+		payload := data
+		if !startsWithContainerHeader(data, audioFormat) && len(localInit) > 0 {
+			payload = append(append(make([]byte, 0, len(localInit)+len(data)), localInit...), data...)
+		}
+
+		text, err := rec.Transcribe(payload, audioFormat, language)
 		if err != nil {
-			log.Printf("transcribe error: %v", err)
+			log.Printf("transcribe error format=%s: %v", audioFormat, err)
+			writeJSON(conn, &writeMu, errorMsg{
+				Type:    "error",
+				Message: "Audio transcription failed. Check the deployed OpenAI API key and microphone format.",
+			})
 			return
 		}
 		if text == "" {
 			return
 		}
 		msg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: text})
-		conn.WriteMessage(websocket.TextMessage, msg) //nolint:errcheck
+		writeMessage(conn, &writeMu, msg)
 		hub.Broadcast(sessionID, msg)
 		if onTranscript != nil {
 			onTranscript(text)
@@ -88,9 +106,10 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 	for {
 		select {
 		case data := <-msgs:
-			if len(webmInit) == 0 {
-				if init := extractWebMInitSegment(data); len(init) > 0 {
-					webmInit = init
+			if len(initSegment) == 0 {
+				combined := append(append([]byte{}, buf...), data...)
+				if init := extractInitSegment(combined, audioFormat); len(init) > 0 {
+					initSegment = init
 				}
 			}
 			buf = append(buf, data...)
@@ -98,11 +117,98 @@ func HandleOperatorAudio(w http.ResponseWriter, r *http.Request, sessionID strin
 			chunk := make([]byte, len(buf))
 			copy(chunk, buf)
 			buf = buf[:0]
-			go flush(chunk)
+			init := append([]byte{}, initSegment...)
+			go flush(chunk, init)
 		case <-done:
-			go flush(buf)
+			flush(buf, initSegment)
 			return
 		}
+	}
+}
+
+func writeJSON(conn *websocket.Conn, writeMu *sync.Mutex, value any) {
+	msg, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	writeMessage(conn, writeMu, msg)
+}
+
+func writeMessage(conn *websocket.Conn, writeMu *sync.Mutex, msg []byte) {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		log.Printf("audio ws write: %v", err)
+	}
+}
+
+func audioFormatFromRequest(r *http.Request) string {
+	if format := normalizeAudioFormat(r.URL.Query().Get("format")); format != "" {
+		return format
+	}
+	if format := audioFormatFromMime(r.URL.Query().Get("mime")); format != "" {
+		return format
+	}
+	return "webm"
+}
+
+func normalizeAudioFormat(format string) string {
+	format = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(format)), ".")
+	switch format {
+	case "flac", "m4a", "mp3", "mp4", "mpeg", "mpga", "ogg", "wav", "webm":
+		return format
+	default:
+		return ""
+	}
+}
+
+func audioFormatFromMime(mimeType string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(mimeType))
+	if idx := strings.Index(mediaType, ";"); idx >= 0 {
+		mediaType = strings.TrimSpace(mediaType[:idx])
+	}
+
+	switch mediaType {
+	case "audio/webm", "video/webm":
+		return "webm"
+	case "audio/mp4", "video/mp4":
+		return "mp4"
+	case "audio/x-m4a":
+		return "m4a"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	case "audio/mpga":
+		return "mpga"
+	case "audio/ogg", "application/ogg":
+		return "ogg"
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "wav"
+	case "audio/flac", "audio/x-flac":
+		return "flac"
+	default:
+		return ""
+	}
+}
+
+func startsWithContainerHeader(data []byte, format string) bool {
+	switch format {
+	case "webm":
+		return startsWithWebMHeader(data)
+	case "m4a", "mp4":
+		return startsWithMP4Header(data)
+	default:
+		return false
+	}
+}
+
+func extractInitSegment(data []byte, format string) []byte {
+	switch format {
+	case "webm":
+		return extractWebMInitSegment(data)
+	case "m4a", "mp4":
+		return extractMP4InitSegment(data)
+	default:
+		return nil
 	}
 }
 
@@ -125,5 +231,22 @@ func extractWebMInitSegment(data []byte) []byte {
 	}
 	init := make([]byte, idx)
 	copy(init, data[:idx])
+	return init
+}
+
+func startsWithMP4Header(data []byte) bool {
+	return len(data) >= 8 && string(data[4:8]) == "ftyp"
+}
+
+func extractMP4InitSegment(data []byte) []byte {
+	if !startsWithMP4Header(data) {
+		return nil
+	}
+	idx := bytes.Index(data, []byte("moof"))
+	if idx <= 4 {
+		return nil
+	}
+	init := make([]byte, idx-4)
+	copy(init, data[:idx-4])
 	return init
 }
