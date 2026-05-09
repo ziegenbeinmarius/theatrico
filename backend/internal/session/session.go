@@ -18,11 +18,43 @@ type Session struct {
 	JoinCode  string
 	Script    *script.Script
 	CreatedAt time.Time
+
+	mu     sync.Mutex
+	cursor int  // SeqIdx of current highlighted line
+	paused bool // when true the auto-matcher is suspended
+}
+
+// Cursor returns the current cursor position (SeqIdx).
+func (s *Session) Cursor() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cursor
+}
+
+// SetCursor updates the cursor position.
+func (s *Session) SetCursor(seqIdx int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cursor = seqIdx
+}
+
+// Paused returns whether auto-matching is paused.
+func (s *Session) Paused() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.paused
+}
+
+// SetPaused sets the paused flag.
+func (s *Session) SetPaused(p bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.paused = p
 }
 
 type Store struct {
-	mu       sync.RWMutex
-	byCode   map[string]*Session
+	mu            sync.RWMutex
+	byCode        map[string]*Session
 	defaultScript *script.Script
 }
 

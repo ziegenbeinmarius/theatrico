@@ -1,21 +1,25 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Wifi, WifiOff } from 'lucide-react';
+import { Sun, Moon, Wifi, WifiOff } from 'lucide-react';
 import { ScriptRenderer } from '../components/ScriptRenderer';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSessionQuery } from '../hooks/useSessions';
 
+type FontSize = 'sm' | 'md' | 'lg';
+
 export function ScriptView() {
   const { code } = useParams<{ code: string }>();
   const sessionQuery = useSessionQuery(code);
-  const { status, lastPosition } = useWebSocket(sessionQuery.data ? code : undefined);
+  const { status, lastPosition, lastPaused } = useWebSocket(sessionQuery.data ? code : undefined);
+  const [dark, setDark] = useState(true);
+  const [fontSize, setFontSize] = useState<FontSize>('md');
 
-  if (sessionQuery.isLoading) return <Centered>Loading...</Centered>;
+  if (sessionQuery.isLoading) return <Centered dark={dark}>Loading...</Centered>;
   if (sessionQuery.isError || !sessionQuery.data) {
     return (
-      <Centered>
+      <Centered dark={dark}>
         <div className="space-y-4 text-center">
           <p>Session not found.</p>
           <Button asChild variant="secondary">
@@ -27,26 +31,55 @@ export function ScriptView() {
   }
 
   const session = sessionQuery.data;
+  const paused = lastPaused ?? false;
+
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#130f13_0%,#181113_44%,#101716_100%)] text-foreground">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-3xl items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm text-muted-foreground">Session {session.join_code}</p>
-            <h1 className="truncate text-lg font-semibold tracking-normal">{session.script.title}</h1>
+    <div className={dark ? 'dark' : ''}>
+      <div className="min-h-screen bg-background text-foreground transition-colors">
+        <header className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="mx-auto flex max-w-3xl items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-muted-foreground">Session {session.join_code}</p>
+              <h1 className="truncate text-lg font-semibold tracking-normal">{session.script.title}</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              {paused && (
+                <Badge variant="outline" className="text-yellow-400 border-yellow-600">Paused</Badge>
+              )}
+              <StatusBadge status={status} />
+              <button
+                onClick={() => setFontSize(f => f === 'sm' ? 'md' : f === 'md' ? 'lg' : 'sm')}
+                className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                aria-label="Toggle font size"
+              >
+                {fontSize === 'sm' ? 'A' : fontSize === 'md' ? 'A+' : 'A++'}
+              </button>
+              <button
+                onClick={() => setDark(d => !d)}
+                className="rounded border border-border p-1.5 text-muted-foreground hover:text-foreground"
+                aria-label="Toggle dark mode"
+              >
+                {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
-          <StatusBadge status={status} />
-        </div>
-      </header>
-      <ScriptRenderer script={session.script} highlightedLine={lastPosition} />
+        </header>
+        <ScriptRenderer
+          script={session.script}
+          highlightedLine={lastPosition}
+          fontSize={fontSize}
+        />
+      </div>
     </div>
   );
 }
 
-function Centered({ children }: { children: ReactNode }) {
+function Centered({ children, dark }: { children: ReactNode; dark: boolean }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-      {children}
+    <div className={dark ? 'dark' : ''}>
+      <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+        {children}
+      </div>
     </div>
   );
 }

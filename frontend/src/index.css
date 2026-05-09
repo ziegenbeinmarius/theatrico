@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    /* dark theater theme (default) */
     --background: 330 13% 7%;
     --foreground: 36 38% 92%;
     --card: 334 14% 11%;
@@ -24,6 +25,18 @@
     --radius: 0.5rem;
   }
 
+  /* light override — warm parchment feel */
+  .light {
+    --background: 40 30% 97%;
+    --foreground: 330 20% 10%;
+    --card: 40 20% 93%;
+    --card-foreground: 330 20% 10%;
+    --muted: 40 10% 88%;
+    --muted-foreground: 330 10% 45%;
+    --border: 40 15% 80%;
+    --input: 40 15% 80%;
+  }
+
   * {
     @apply border-border;
   }
@@ -35,5 +48,16 @@
   button,
   input {
     font: inherit;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  /* Smooth line highlight transition — used by ScriptRenderer */
+  .script-line-active {
+    transition: background-color 0.35s ease, box-shadow 0.35s ease;
   }
 }
