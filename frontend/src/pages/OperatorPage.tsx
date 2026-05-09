@@ -12,7 +12,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import {
   useCreateSessionMutation,
   usePlaysQuery,
-  useScriptQuery,
+  usePlayQuery,
   useSessionQuery,
 } from "../hooks/useSessions";
 import { PositionUpdate, StatusMsg, SessionInfo } from "../types";
@@ -96,18 +96,20 @@ type WebAudioWindow = Window & typeof globalThis & {
 
 
 export function OperatorPage() {
-  const scriptQuery = useScriptQuery();
   const playsQuery = usePlaysQuery();
   const createSession = useCreateSessionMutation();
-  const [fullSession, setFullSession] = useState<SessionInfo | null>(null);
-  const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
-  const sessionQuery = useSessionQuery(pendingJoinCode ?? undefined);
-  const session = fullSession;
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const sessionQuery = useSessionQuery(joinCode ?? undefined);
+  const session = sessionQuery.data ?? null;
 
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [selectedScript, setSelectedScript] = useState('');
+
+  // Load the selected play's script as soon as a play is chosen — makes the
+  // script panel available before (and independently of) the session query.
+  const playQuery = usePlayQuery(selectedScript || undefined);
   const [streaming, setStreaming] = useState(false);
   const [streamStarting, setStreamStarting] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
@@ -115,6 +117,9 @@ export function OperatorPage() {
   const [paused, setPaused] = useState(false);
   const [clients, setClients] = useState(0);
   const [streamError, setStreamError] = useState('');
+
+  // Prefer the session's script (authoritative), fall back to the pre-loaded play script.
+  const displayScript = session?.script ?? playQuery.data?.script ?? null;
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioWsRef = useRef<WebSocket | null>(null);
@@ -429,27 +434,18 @@ export function OperatorPage() {
     setPosition(null);
     setPaused(false);
     setClients(0);
-    setFullSession(null);
-    setPendingJoinCode(null);
+    setJoinCode(null);
     createSession.mutate(
       { language: selectedLanguage, scriptId: selectedScript },
       {
         onSuccess: (data) => {
           if (data && data.join_code) {
-            setPendingJoinCode(data.join_code);
+            setJoinCode(data.join_code);
           }
         },
       },
     );
   }
-
-  // When sessionQuery loads, update fullSession
-  useEffect(() => {
-    if (sessionQuery.data) {
-      setFullSession(sessionQuery.data);
-      setPendingJoinCode(null);
-    }
-  }, [sessionQuery.data]);
 
   function handleLineClick(seqIdx: number) {
     sendControl({ type: 'force_position', line: seqIdx });
@@ -747,7 +743,7 @@ export function OperatorPage() {
 
           {/* Right column: script summary + script view for click-to-jump */}
           <div className="space-y-6">
-            {session && session.script && (
+            {displayScript && (
               <Card className="self-start">
                 <CardHeader>
                   <div className="flex items-center gap-2">
@@ -758,24 +754,24 @@ export function OperatorPage() {
                     <CardTitle className="text-lg">Script</CardTitle>
                   </div>
                   <CardDescription>
-                    Script loaded for this session.
+                    {session ? "Script loaded for this session." : "Select a play to preview the script."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <div className="flex items-center justify-between border-b border-border pb-3">
                     <span className="text-muted-foreground">Title</span>
-                    <span className="font-medium">{session.script.title}</span>
+                    <span className="font-medium">{displayScript.title}</span>
                   </div>
                   <div className="flex items-center justify-between border-b border-border pb-3">
                     <span className="text-muted-foreground">Acts</span>
                     <span className="font-medium">
-                      {session.script.acts.length}
+                      {displayScript.acts.length}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Scenes</span>
                     <span className="font-medium">
-                      {session.script.acts.reduce(
+                      {displayScript.acts.reduce(
                         (total: number, act: import("../types").ScriptAct) =>
                           total + act.scenes.length,
                         0,
@@ -787,20 +783,24 @@ export function OperatorPage() {
             )}
 
             {/* Clickable script for force-jump */}
-            {session && scriptQuery.data && (
+            {displayScript && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Click to Jump</CardTitle>
+                  <CardTitle className="text-sm">
+                    {session ? "Click to Jump" : "Script Preview"}
+                  </CardTitle>
                   <CardDescription className="text-xs">
-                    Click a line to force the cursor there.
+                    {session
+                      ? "Click a line to force the cursor there."
+                      : "Start a session to enable cursor control."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="max-h-[28rem] overflow-y-auto p-0">
                   <ScriptRenderer
-                    script={scriptQuery.data}
+                    script={displayScript}
                     highlightedLine={position}
                     fontSize="sm"
-                    onLineClick={handleLineClick}
+                    onLineClick={session ? handleLineClick : undefined}
                   />
                 </CardContent>
               </Card>

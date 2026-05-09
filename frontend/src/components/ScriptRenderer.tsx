@@ -23,6 +23,7 @@ const fontSizeClasses: Record<FontSize, string> = {
 interface LineRowProps {
   line: ScriptLine;
   active: boolean;
+  upcoming: boolean;
   color: string;
   fontSize: FontSize;
   clickable: boolean;
@@ -31,7 +32,7 @@ interface LineRowProps {
   activeLineRef: React.MutableRefObject<HTMLDivElement | null>;
 }
 
-const LineRow = memo(function LineRow({ line, active, color, fontSize, clickable, onLineClick, seqIdx, activeLineRef }: LineRowProps) {
+const LineRow = memo(function LineRow({ line, active, upcoming, color, fontSize, clickable, onLineClick, seqIdx, activeLineRef }: LineRowProps) {
   return (
     <div
       ref={active ? (el) => { activeLineRef.current = el; } : undefined}
@@ -39,6 +40,7 @@ const LineRow = memo(function LineRow({ line, active, color, fontSize, clickable
       className={cn(
         'grid grid-cols-[6.75rem_1fr] gap-3 rounded-md px-3 py-2 duration-300 transition-colors sm:grid-cols-[8rem_1fr]',
         active && 'bg-secondary/10 ring-1 ring-secondary',
+        upcoming && !active && 'bg-primary/5 ring-1 ring-primary/30 opacity-70',
         clickable && 'cursor-pointer hover:bg-muted/20',
       )}
     >
@@ -85,6 +87,27 @@ export function ScriptRenderer({ script, highlightedLine, fontSize = 'md', onLin
     return m;
   }, [script]);
 
+  // Maps seqIdx → {actIdx, sceneIdx, lineId} for upcoming-line lookup.
+  const seqToPos = useMemo(() => {
+    const m = new Map<number, { actIdx: number; sceneIdx: number; lineId: number }>();
+    let seq = 0;
+    for (const [actIdx, act] of script.acts.entries()) {
+      for (const [sceneIdx, scene] of act.scenes.entries()) {
+        for (const line of scene.lines) {
+          m.set(seq++, { actIdx, sceneIdx, lineId: line.id });
+        }
+      }
+    }
+    return m;
+  }, [script]);
+
+  const upcomingPos = useMemo(() => {
+    if (!highlightedLine) return null;
+    const cur = seqMap.get(highlightedLine.line);
+    if (cur === undefined) return null;
+    return seqToPos.get(cur + 1) ?? null;
+  }, [highlightedLine, seqMap, seqToPos]);
+
   useEffect(() => {
     activeLineRef.current?.scrollIntoView({ behavior: 'auto', block: 'center' });
   }, [highlightedLine?.act, highlightedLine?.scene, highlightedLine?.line]);
@@ -93,6 +116,11 @@ export function ScriptRenderer({ script, highlightedLine, fontSize = 'md', onLin
     if (!highlightedLine) return false;
     return highlightedLine.act === actIdx && highlightedLine.scene === sceneIdx && highlightedLine.line === line.id;
   }, [highlightedLine]);
+
+  const isUpcomingLine = useCallback((actIdx: number, sceneIdx: number, line: ScriptLine): boolean => {
+    if (!upcomingPos) return false;
+    return upcomingPos.actIdx === actIdx && upcomingPos.sceneIdx === sceneIdx && upcomingPos.lineId === line.id;
+  }, [upcomingPos]);
 
   return (
     <article className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
@@ -110,6 +138,7 @@ export function ScriptRenderer({ script, highlightedLine, fontSize = 'md', onLin
                     key={line.id}
                     line={line}
                     active={isActiveLine(actIdx, sceneIdx, line)}
+                    upcoming={isUpcomingLine(actIdx, sceneIdx, line)}
                     color={characterColors.get(line.character) ?? palette[0]}
                     fontSize={fontSize}
                     clickable={!!onLineClick}

@@ -1,4 +1,4 @@
-import { CreateSessionResponse, PlayInfo, Script, SessionInfo } from '../types';
+import { CreateSessionResponse, PlayDetail, PlayInfo, SessionInfo } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -17,16 +17,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getScript() {
-  return request<Script>('/api/script');
-}
-
 export function getSession(code: string) {
   return request<SessionInfo>(`/api/sessions/${code.toUpperCase()}`);
 }
 
 export function getPlays() {
   return request<PlayInfo[]>('/api/plays');
+}
+
+export function getPlay(id: string) {
+  return request<PlayDetail>(`/api/plays/${encodeURIComponent(id)}`);
 }
 
 export function createSession(params: { language?: string; scriptId?: string }) {
