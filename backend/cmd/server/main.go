@@ -61,11 +61,12 @@ type createSessionResponse struct {
 }
 
 type sessionInfoResponse struct {
-	JoinCode string         `json:"join_code"`
-	Script   *script.Script `json:"script"`
-	Cursor   int            `json:"cursor"`
-	Paused   bool           `json:"paused"`
-	Clients  int            `json:"clients"`
+	JoinCode      string         `json:"join_code"`
+	Script        *script.Script `json:"script"`
+	Cursor        int            `json:"cursor"`
+	Paused        bool           `json:"paused"`
+	Clients       int            `json:"clients"`
+	ChunkDuration int            `json:"chunk_duration_ms"`
 }
 
 type positionUpdate struct {
@@ -254,11 +255,12 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 		return
 	}
 	resp := sessionInfoResponse{
-		JoinCode: sess.JoinCode,
-		Script:   sess.Script,
-		Cursor:   sess.Cursor(),
-		Paused:   sess.Paused(),
-		Clients:  s.hub.ClientCount(sess.ID),
+		JoinCode:      sess.JoinCode,
+		Script:        sess.Script,
+		Cursor:        sess.Cursor(),
+		Paused:        sess.Paused(),
+		Clients:       s.hub.ClientCount(sess.ID),
+		ChunkDuration: int(s.chunkDuration.Milliseconds()),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck

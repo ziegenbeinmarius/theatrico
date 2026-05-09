@@ -93,7 +93,7 @@ export function OperatorPage() {
   }, [refreshDevices]);
 
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [transcripts]);
 
   async function startStreaming() {
@@ -130,7 +130,7 @@ export function OperatorPage() {
         recorder.ondataavailable = (e) => {
           if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
         };
-        recorder.start(7000);
+        recorder.start(250);
         setStreaming(true);
       };
     } catch (err) {

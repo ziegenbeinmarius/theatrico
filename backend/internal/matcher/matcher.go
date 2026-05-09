@@ -28,14 +28,25 @@ type MatchResult struct {
 type Matcher struct {
 	mu         sync.Mutex
 	lines      []script.FlatLine
+	normTexts  []string
+	normGrams  []map[string]int
 	cursor     int // SeqIdx of current position
 	windowSize int
 	threshold  float64
 }
 
 func New(lines []script.FlatLine) *Matcher {
+	normTexts := make([]string, len(lines))
+	normGrams := make([]map[string]int, len(lines))
+	for i, l := range lines {
+		n := normalize(l.Text)
+		normTexts[i] = n
+		normGrams[i] = trigrams(n)
+	}
 	return &Matcher{
 		lines:      lines,
+		normTexts:  normTexts,
+		normGrams:  normGrams,
 		windowSize: DefaultWindowSize,
 		threshold:  DefaultThreshold,
 	}
@@ -90,8 +101,14 @@ func (m *Matcher) Match(transcript string) *MatchResult {
 	bestScore := -1.0
 	bestIdx := -1
 
+	inputGrams := trigrams(norm)
 	for i := cursor; i < end; i++ {
-		score := trigramSimilarity(norm, normalize(lines[i].Text))
+		var score float64
+		if inputGrams != nil && m.normGrams[i] != nil {
+			score = trigramSimilarityPrecomputed(inputGrams, m.normGrams[i])
+		} else {
+			score = wordOverlap(norm, m.normTexts[i])
+		}
 		if score > bestScore {
 			bestScore = score
 			bestIdx = i
@@ -121,6 +138,16 @@ func normalize(s string) string {
 	s = strings.ToLower(s)
 	s = nonAlpha.ReplaceAllString(s, " ")
 	return strings.Join(strings.Fields(s), " ")
+}
+
+func trigramSimilarityPrecomputed(ta, tb map[string]int) float64 {
+	intersection := 0
+	for k, ca := range ta {
+		if cb := tb[k]; cb > 0 {
+			intersection += int(math.Min(float64(ca), float64(cb)))
+		}
+	}
+	return 2.0 * float64(intersection) / float64(len(ta)+len(tb))
 }
 
 func trigramSimilarity(a, b string) float64 {
