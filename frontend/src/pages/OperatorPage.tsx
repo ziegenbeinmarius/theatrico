@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useCreateSessionMutation, useScriptQuery } from '../hooks/useSessions';
+import { useCreateSessionMutation, usePlaysQuery, useScriptQuery } from '../hooks/useSessions';
 import { PositionUpdate, StatusMsg } from '../types';
 
 interface AudioDevice {
@@ -91,12 +91,14 @@ type WebAudioWindow = Window & typeof globalThis & {
 
 export function OperatorPage() {
   const scriptQuery = useScriptQuery();
+  const playsQuery = usePlaysQuery();
   const createSession = useCreateSessionMutation();
   const session = createSession.data;
 
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('');
+  const [selectedScript, setSelectedScript] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [streamStarting, setStreamStarting] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
@@ -406,7 +408,7 @@ export function OperatorPage() {
     setPosition(null);
     setPaused(false);
     setClients(0);
-    createSession.mutate(selectedLanguage);
+    createSession.mutate({ language: selectedLanguage, scriptId: selectedScript });
   }
 
   function handleLineClick(seqIdx: number) {
@@ -459,12 +461,28 @@ export function OperatorPage() {
                 {session ? (
                   <>
                     <QRCodeDisplay joinCode={session.join_code} url={session.qr_url} />
+                    {session.script_title && (
+                      <p className="text-sm text-muted-foreground">
+                        Play: <span className="font-medium text-foreground">{session.script_title}</span>
+                      </p>
+                    )}
                     {session.language && (
                       <p className="text-sm text-muted-foreground">
                         Language: <span className="font-medium text-foreground">{LANGUAGES.find(l => l.code === session.language)?.label ?? session.language}</span>
                       </p>
                     )}
                     <div className="space-y-3">
+                      <div>
+                        <label className="mb-1.5 block text-sm text-muted-foreground">Play for next session</label>
+                        <select
+                          value={selectedScript}
+                          onChange={e => setSelectedScript(e.target.value)}
+                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value="">Default play</option>
+                          {playsQuery.data?.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                        </select>
+                      </div>
                       <div>
                         <label className="mb-1.5 block text-sm text-muted-foreground">Language for next session</label>
                         <select
@@ -485,6 +503,17 @@ export function OperatorPage() {
                   </>
                 ) : (
                   <div className="space-y-4">
+                    <div>
+                      <label className="mb-1.5 block text-sm text-muted-foreground">Play</label>
+                      <select
+                        value={selectedScript}
+                        onChange={e => setSelectedScript(e.target.value)}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value="">Default play</option>
+                        {playsQuery.data?.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                      </select>
+                    </div>
                     <div>
                       <label className="mb-1.5 block text-sm text-muted-foreground">Script language</label>
                       <select

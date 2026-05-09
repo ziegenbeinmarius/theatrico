@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,9 +29,18 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// playEntry holds a parsed script and its precomputed flat lines.
+type playEntry struct {
+	ID        string
+	Title     string
+	Script    *script.Script
+	FlatLines []script.FlatLine
+}
+
 type server struct {
-	script        *script.Script
-	flatLines     []script.FlatLine
+	plays         map[string]*playEntry // keyed by play ID (filename without .md)
+	playOrder     []string              // IDs in sorted order for listing
+	defaultPlayID string
 	sessions      *session.Store
 	hub           *ws.Hub
 	rec           *recognizer.Recognizer
@@ -43,26 +54,33 @@ type server struct {
 }
 
 // sessionMatcher returns the matcher for the session, creating it if needed.
-func (s *server) sessionMatcher(sessID string) *matcher.Matcher {
+func (s *server) sessionMatcher(sess *session.Session) *matcher.Matcher {
 	s.matchersMu.Lock()
 	defer s.matchersMu.Unlock()
-	if m, ok := s.matchers[sessID]; ok {
+	if m, ok := s.matchers[sess.ID]; ok {
 		return m
 	}
-	m := matcher.New(s.flatLines)
+	m := matcher.New(sess.FlatLines)
 	m.Configure(s.matchWindow, s.matchThreshold)
-	s.matchers[sessID] = m
+	s.matchers[sess.ID] = m
 	return m
 }
 
 type createSessionRequest struct {
 	Language string `json:"language"`
+	ScriptID string `json:"script_id"`
 }
 
 type createSessionResponse struct {
-	JoinCode string `json:"join_code"`
-	QRUrl    string `json:"qr_url"`
-	Language string `json:"language"`
+	JoinCode    string `json:"join_code"`
+	QRUrl       string `json:"qr_url"`
+	Language    string `json:"language"`
+	ScriptTitle string `json:"script_title"`
+}
+
+type playListItem struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 type sessionInfoResponse struct {
@@ -110,6 +128,65 @@ type operatorMsg struct {
 	Line int    `json:"line"` // used for force_position (SeqIdx)
 }
 
+var titleCommentRe = regexp.MustCompile(`<!--\s*title:\s*(.+?)\s*-->`)
+
+// loadPlays scans dir for .md files and parses each as a script.
+func loadPlays(dir string) (map[string]*playEntry, []string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	plays := make(map[string]*playEntry)
+	var ids []string
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		id := strings.TrimSuffix(entry.Name(), ".md")
+		filePath := filepath.Join(dir, entry.Name())
+
+		scr, err := script.ParseFile(filePath)
+		if err != nil {
+			log.Printf("warning: skipping script %s: %v", entry.Name(), err)
+			continue
+		}
+
+		title := fileNameToTitle(id)
+		if data, readErr := os.ReadFile(filePath); readErr == nil {
+			firstLine := strings.SplitN(string(data), "\n", 2)[0]
+			if m := titleCommentRe.FindStringSubmatch(firstLine); m != nil {
+				title = strings.TrimSpace(m[1])
+			}
+		}
+		scr.Title = title
+
+		flatLines := script.Flatten(scr)
+		plays[id] = &playEntry{
+			ID:        id,
+			Title:     title,
+			Script:    scr,
+			FlatLines: flatLines,
+		}
+		ids = append(ids, id)
+	}
+
+	sort.Strings(ids)
+	return plays, ids, nil
+}
+
+func fileNameToTitle(name string) string {
+	words := strings.Split(name, "-")
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 func main() {
 	for _, envPath := range []string{".env", "../../.env"} {
 		err := godotenv.Overload(envPath)
@@ -134,6 +211,8 @@ func main() {
 	if scriptPath == "" {
 		scriptPath = "scripts/default.md"
 	}
+	scriptsDir := filepath.Dir(scriptPath)
+	defaultPlayID := strings.TrimSuffix(filepath.Base(scriptPath), ".md")
 
 	chunkDuration := 7 * time.Second
 	if s := os.Getenv("WHISPER_CHUNK_DURATION"); s != "" {
@@ -153,15 +232,26 @@ func main() {
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 
-	scr, err := script.ParseFile(scriptPath)
+	plays, playOrder, err := loadPlays(scriptsDir)
 	if err != nil {
-		log.Fatalf("parse script: %v", err)
+		log.Fatalf("load plays: %v", err)
+	}
+	if len(plays) == 0 {
+		log.Fatalf("no script files found in %s", scriptsDir)
+	}
+	if _, ok := plays[defaultPlayID]; !ok {
+		// Fall back to first play if default not found.
+		defaultPlayID = playOrder[0]
+		log.Printf("warning: default script %q not found, using %q", scriptPath, defaultPlayID)
 	}
 
+	log.Printf("loaded %d play(s): %s", len(plays), strings.Join(playOrder, ", "))
+
 	srv := &server{
-		script:         scr,
-		flatLines:      script.Flatten(scr),
-		sessions:       session.NewStore(scr),
+		plays:          plays,
+		playOrder:      playOrder,
+		defaultPlayID:  defaultPlayID,
+		sessions:       session.NewStore(),
 		hub:            ws.NewHub(),
 		rec:            recognizer.New(apiKey),
 		host:           host,
@@ -172,6 +262,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/plays", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		srv.handleListPlays(w, r)
+	})
 	mux.HandleFunc("/api/script", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -230,9 +327,20 @@ func main() {
 	}
 }
 
-func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleListPlays(w http.ResponseWriter, r *http.Request) {
+	items := make([]playListItem, 0, len(s.playOrder))
+	for _, id := range s.playOrder {
+		p := s.plays[id]
+		items = append(items, playListItem{ID: p.ID, Title: p.Title})
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.script) //nolint:errcheck
+	json.NewEncoder(w).Encode(items) //nolint:errcheck
+}
+
+func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
+	play := s.plays[s.defaultPlayID]
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(play.Script) //nolint:errcheck
 }
 
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -241,23 +349,29 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
 	}
 
-	sess, err := s.sessions.Create(req.Language)
+	play, ok := s.plays[req.ScriptID]
+	if !ok {
+		play = s.plays[s.defaultPlayID]
+	}
+
+	sess, err := s.sessions.Create(req.Language, play.Script, play.FlatLines)
 	if err != nil {
 		log.Printf("create session: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	// Pre-create the matcher so it's ready.
-	s.sessionMatcher(sess.ID)
+	s.sessionMatcher(sess)
 
 	resp := createSessionResponse{
-		JoinCode: sess.JoinCode,
-		QRUrl:    fmt.Sprintf("http://%s/join/%s", s.host, sess.JoinCode),
-		Language: sess.Language,
+		JoinCode:    sess.JoinCode,
+		QRUrl:       fmt.Sprintf("http://%s/join/%s", s.host, sess.JoinCode),
+		Language:    sess.Language,
+		ScriptTitle: play.Title,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	log.Printf("session created join_code=%s language=%q", sess.JoinCode, sess.Language)
+	log.Printf("session created join_code=%s language=%q script=%q", sess.JoinCode, sess.Language, play.ID)
 }
 
 func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code string) {
@@ -301,7 +415,7 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	m := s.sessionMatcher(sess.ID)
+	m := s.sessionMatcher(sess)
 	onTranscript := func(text string) {
 		if sess.Paused() {
 			return
@@ -322,14 +436,13 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 }
 
 // handleOperatorWS handles the operator control websocket.
-// It accepts force_position / pause / resume messages and sends back status updates.
 func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(code)
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	m := s.sessionMatcher(sess.ID)
+	m := s.sessionMatcher(sess)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -349,7 +462,6 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 		conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
 	}
 
-	// Send initial status on connect.
 	sendStatus()
 
 	conn.SetReadLimit(4096)
@@ -364,9 +476,9 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 		}
 		switch msg.Type {
 		case "force_position":
-			if msg.Line >= 0 && msg.Line < len(s.flatLines) {
+			if msg.Line >= 0 && msg.Line < len(sess.FlatLines) {
 				m.ForcePosition(msg.Line)
-				fl := s.flatLines[msg.Line]
+				fl := sess.FlatLines[msg.Line]
 				sess.SetCursor(msg.Line)
 				update, _ := json.Marshal(positionUpdate{
 					Type:      "position_update",
@@ -403,13 +515,11 @@ func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code str
 		return
 	}
 
-	// Echo transcript to all clients.
 	tmsg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: req.Text})
 	s.hub.Broadcast(sess.ID, tmsg)
 
-	// Run matcher if not paused.
 	if !sess.Paused() {
-		m := s.sessionMatcher(sess.ID)
+		m := s.sessionMatcher(sess)
 		if result := m.Match(req.Text); result != nil {
 			sess.SetCursor(result.SeqIdx)
 			update, _ := json.Marshal(positionUpdate{
