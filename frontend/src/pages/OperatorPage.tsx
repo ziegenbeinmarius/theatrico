@@ -37,6 +37,15 @@ const LANGUAGES: { code: string; label: string }[] = [
   { code: 'ar', label: 'Arabic' },
 ];
 
+const VOICE_ACTIVITY_POLL_MS = 80;
+const VOICE_ACTIVITY_HOLD_MS = 450;
+const MIN_VOICE_RMS = 0.012;
+const NOISE_FLOOR_MULTIPLIER = 2.5;
+
+type WebAudioWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 export function OperatorPage() {
   const scriptQuery = useScriptQuery();
   const createSession = useCreateSessionMutation();
@@ -55,6 +64,17 @@ export function OperatorPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioWsRef = useRef<WebSocket | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const voiceMonitorRef = useRef<number | null>(null);
+  const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioLevelDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const voiceGateReadyRef = useRef(false);
+  const heardVoiceSinceLastBlobRef = useRef(false);
+  const voiceActiveUntilRef = useRef(0);
+  const noiseFloorRef = useRef(0.006);
+  const sentInitialAudioRef = useRef(false);
+  const initialAudioBlobRef = useRef<Blob | null>(null);
 
   // Operator control websocket (Sprint 4)
   const { send: sendOperator } = useWebSocket(session?.join_code, 'operator');
@@ -117,6 +137,104 @@ export function OperatorPage() {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [transcripts]);
 
+  async function startVoiceActivityGate(stream: MediaStream) {
+    resetVoiceActivityGate();
+    const AudioContextCtor = window.AudioContext ?? (window as WebAudioWindow).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    try {
+      const context = new AudioContextCtor();
+      if (context.state === 'suspended') {
+        await context.resume();
+      }
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+
+      audioContextRef.current = context;
+      mediaStreamSourceRef.current = source;
+      analyserRef.current = analyser;
+      audioLevelDataRef.current = new Uint8Array(analyser.fftSize);
+      voiceGateReadyRef.current = true;
+      noiseFloorRef.current = 0.006;
+
+      voiceMonitorRef.current = window.setInterval(() => {
+        const currentAnalyser = analyserRef.current;
+        const data = audioLevelDataRef.current;
+        if (!currentAnalyser || !data) return;
+
+        currentAnalyser.getByteTimeDomainData(data);
+        let sumSquares = 0;
+        for (const value of data) {
+          const centered = (value - 128) / 128;
+          sumSquares += centered * centered;
+        }
+        const rms = Math.sqrt(sumSquares / data.length);
+        const threshold = Math.max(MIN_VOICE_RMS, noiseFloorRef.current * NOISE_FLOOR_MULTIPLIER);
+        const now = Date.now();
+
+        if (rms >= threshold) {
+          heardVoiceSinceLastBlobRef.current = true;
+          voiceActiveUntilRef.current = now + VOICE_ACTIVITY_HOLD_MS;
+          return;
+        }
+
+        if (now > voiceActiveUntilRef.current) {
+          noiseFloorRef.current = (noiseFloorRef.current * 0.95) + (rms * 0.05);
+        }
+      }, VOICE_ACTIVITY_POLL_MS);
+    } catch {
+      resetVoiceActivityGate();
+    }
+  }
+
+  function resetVoiceActivityGate() {
+    if (voiceMonitorRef.current !== null) {
+      window.clearInterval(voiceMonitorRef.current);
+    }
+    voiceMonitorRef.current = null;
+    mediaStreamSourceRef.current?.disconnect();
+    mediaStreamSourceRef.current = null;
+    analyserRef.current = null;
+    audioLevelDataRef.current = null;
+    voiceGateReadyRef.current = false;
+    heardVoiceSinceLastBlobRef.current = false;
+    voiceActiveUntilRef.current = 0;
+    noiseFloorRef.current = 0.006;
+    sentInitialAudioRef.current = false;
+    initialAudioBlobRef.current = null;
+    audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+  }
+
+  function shouldSendAudioBlob() {
+    if (!voiceGateReadyRef.current) return true;
+    const hasRecentVoice = heardVoiceSinceLastBlobRef.current || Date.now() < voiceActiveUntilRef.current;
+    heardVoiceSinceLastBlobRef.current = false;
+    return hasRecentVoice;
+  }
+
+  function sendGatedAudioBlob(blob: Blob, ws: WebSocket) {
+    if (blob.size === 0 || ws.readyState !== WebSocket.OPEN) return;
+
+    const sendNow = shouldSendAudioBlob();
+    if (!sentInitialAudioRef.current) {
+      if (!initialAudioBlobRef.current) initialAudioBlobRef.current = blob;
+      if (!sendNow) return;
+
+      if (initialAudioBlobRef.current !== blob) {
+        ws.send(initialAudioBlobRef.current);
+      }
+      ws.send(blob);
+      initialAudioBlobRef.current = null;
+      sentInitialAudioRef.current = true;
+      return;
+    }
+
+    if (sendNow) ws.send(blob);
+  }
+
   async function startStreaming() {
     if (!session) return;
     setStreamError('');
@@ -125,6 +243,7 @@ export function OperatorPage() {
         audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
       });
       refreshDevices();
+      await startVoiceActivityGate(stream);
 
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
@@ -149,7 +268,7 @@ export function OperatorPage() {
 
       ws.onopen = () => {
         recorder.ondataavailable = (e) => {
-          if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+          sendGatedAudioBlob(e.data, ws);
         };
         recorder.start(250);
         setStreaming(true);
@@ -163,6 +282,7 @@ export function OperatorPage() {
     mediaRecorderRef.current?.stop();
     mediaRecorderRef.current?.stream.getTracks().forEach(t => t.stop());
     mediaRecorderRef.current = null;
+    resetVoiceActivityGate();
     audioWsRef.current?.close();
     audioWsRef.current = null;
     setStreaming(false);
