@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	"github.com/ziegenbeinmarius/theatrico/internal/audio"
+	"github.com/ziegenbeinmarius/theatrico/internal/matcher"
 	"github.com/ziegenbeinmarius/theatrico/internal/recognizer"
 	"github.com/ziegenbeinmarius/theatrico/internal/script"
 	"github.com/ziegenbeinmarius/theatrico/internal/session"
@@ -27,11 +29,30 @@ var upgrader = websocket.Upgrader{
 
 type server struct {
 	script        *script.Script
+	flatLines     []script.FlatLine
 	sessions      *session.Store
 	hub           *ws.Hub
 	rec           *recognizer.Recognizer
 	host          string
 	chunkDuration time.Duration
+	matchWindow   int
+	matchThreshold float64
+
+	matchersMu sync.Mutex
+	matchers   map[string]*matcher.Matcher // keyed by session ID
+}
+
+// sessionMatcher returns the matcher for the session, creating it if needed.
+func (s *server) sessionMatcher(sessID string) *matcher.Matcher {
+	s.matchersMu.Lock()
+	defer s.matchersMu.Unlock()
+	if m, ok := s.matchers[sessID]; ok {
+		return m
+	}
+	m := matcher.New(s.flatLines)
+	m.Configure(s.matchWindow, s.matchThreshold)
+	s.matchers[sessID] = m
+	return m
 }
 
 type createSessionResponse struct {
@@ -42,6 +63,9 @@ type createSessionResponse struct {
 type sessionInfoResponse struct {
 	JoinCode string         `json:"join_code"`
 	Script   *script.Script `json:"script"`
+	Cursor   int            `json:"cursor"`
+	Paused   bool           `json:"paused"`
+	Clients  int            `json:"clients"`
 }
 
 type positionUpdate struct {
@@ -52,6 +76,18 @@ type positionUpdate struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+type pausedMsg struct {
+	Type   string `json:"type"`
+	Paused bool   `json:"paused"`
+}
+
+type statusMsg struct {
+	Type    string `json:"type"`
+	Cursor  int    `json:"cursor"`
+	Paused  bool   `json:"paused"`
+	Clients int    `json:"clients"`
+}
+
 type simulateRequest struct {
 	Text string `json:"text"`
 }
@@ -59,6 +95,12 @@ type simulateRequest struct {
 type transcriptMsg struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+// operatorMsg is received from the operator websocket client.
+type operatorMsg struct {
+	Type string `json:"type"`
+	Line int    `json:"line"` // used for force_position (SeqIdx)
 }
 
 func main() {
@@ -93,6 +135,15 @@ func main() {
 		}
 	}
 
+	matchWindow := 0
+	if s := os.Getenv("MATCH_WINDOW_SIZE"); s != "" {
+		matchWindow, _ = strconv.Atoi(s)
+	}
+	matchThreshold := 0.0
+	if s := os.Getenv("MATCH_CONFIDENCE_THRESHOLD"); s != "" {
+		matchThreshold, _ = strconv.ParseFloat(s, 64)
+	}
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
 
 	scr, err := script.ParseFile(scriptPath)
@@ -101,18 +152,21 @@ func main() {
 	}
 
 	srv := &server{
-		script:        scr,
-		sessions:      session.NewStore(scr),
-		hub:           ws.NewHub(),
-		rec:           recognizer.New(apiKey),
-		host:          host,
-		chunkDuration: chunkDuration,
+		script:         scr,
+		flatLines:      script.Flatten(scr),
+		sessions:       session.NewStore(scr),
+		hub:            ws.NewHub(),
+		rec:            recognizer.New(apiKey),
+		host:           host,
+		chunkDuration:  chunkDuration,
+		matchWindow:    matchWindow,
+		matchThreshold: matchThreshold,
+		matchers:       make(map[string]*matcher.Matcher),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/script", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			log.Printf("%s %s: method not allowed", r.Method, r.URL.Path)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -120,7 +174,6 @@ func main() {
 	})
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			log.Printf("%s %s: method not allowed", r.Method, r.URL.Path)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -139,6 +192,9 @@ func main() {
 			case "audio":
 				srv.handleAudioWS(w, r, code)
 				return
+			case "operator":
+				srv.handleOperatorWS(w, r, code)
+				return
 			case "simulate":
 				if r.Method == http.MethodPost {
 					srv.handleSimulate(w, r, code)
@@ -149,11 +205,9 @@ func main() {
 			srv.handleGetSession(w, r, code)
 			return
 		}
-		log.Printf("%s %s: not found", r.Method, r.URL.Path)
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s: not found", r.Method, r.URL.Path)
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 
@@ -171,50 +225,48 @@ func main() {
 
 func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(s.script); err != nil {
-		log.Printf("%s %s: encode script response failed: %v", r.Method, r.URL.Path, err)
-	}
+	json.NewEncoder(w).Encode(s.script) //nolint:errcheck
 }
 
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	sess, err := s.sessions.Create()
 	if err != nil {
-		log.Printf("%s %s: create session failed: %v", r.Method, r.URL.Path, err)
+		log.Printf("create session: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// Pre-create the matcher so it's ready.
+	s.sessionMatcher(sess.ID)
+
 	resp := createSessionResponse{
 		JoinCode: sess.JoinCode,
 		QRUrl:    fmt.Sprintf("http://%s/join/%s", s.host, sess.JoinCode),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("%s %s: encode create session response failed: %v", r.Method, r.URL.Path, err)
-	}
-	log.Printf("%s %s: session created join_code=%s", r.Method, r.URL.Path, sess.JoinCode)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	log.Printf("session created join_code=%s", sess.JoinCode)
 }
 
 func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	resp := sessionInfoResponse{
 		JoinCode: sess.JoinCode,
 		Script:   sess.Script,
+		Cursor:   sess.Cursor(),
+		Paused:   sess.Paused(),
+		Clients:  s.hub.ClientCount(sess.ID),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("%s %s: encode session response failed: %v", r.Method, r.URL.Path, err)
-	}
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
 }
 
 func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: websocket session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -231,17 +283,102 @@ func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code st
 func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: audio ws session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration)
+	m := s.sessionMatcher(sess.ID)
+	onTranscript := func(text string) {
+		if sess.Paused() {
+			return
+		}
+		if result := m.Match(text); result != nil {
+			sess.SetCursor(result.SeqIdx)
+			update, _ := json.Marshal(positionUpdate{
+				Type:      "position_update",
+				Act:       result.ActIdx,
+				Scene:     result.SceneIdx,
+				Line:      result.ID,
+				Timestamp: time.Now(),
+			})
+			s.hub.Broadcast(sess.ID, update)
+		}
+	}
+	audio.HandleOperatorAudio(w, r, sess.ID, s.rec, s.hub, s.chunkDuration, onTranscript)
 }
 
+// handleOperatorWS handles the operator control websocket.
+// It accepts force_position / pause / resume messages and sends back status updates.
+func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code string) {
+	sess, ok := s.sessions.Get(code)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	m := s.sessionMatcher(sess.ID)
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("operator ws upgrade: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	sendStatus := func() {
+		status := statusMsg{
+			Type:    "status",
+			Cursor:  sess.Cursor(),
+			Paused:  sess.Paused(),
+			Clients: s.hub.ClientCount(sess.ID),
+		}
+		data, _ := json.Marshal(status)
+		conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
+	}
+
+	// Send initial status on connect.
+	sendStatus()
+
+	conn.SetReadLimit(4096)
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var msg operatorMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case "force_position":
+			if msg.Line >= 0 && msg.Line < len(s.flatLines) {
+				m.ForcePosition(msg.Line)
+				fl := s.flatLines[msg.Line]
+				sess.SetCursor(msg.Line)
+				update, _ := json.Marshal(positionUpdate{
+					Type:      "position_update",
+					Act:       fl.ActIdx,
+					Scene:     fl.SceneIdx,
+					Line:      fl.ID,
+					Timestamp: time.Now(),
+				})
+				s.hub.Broadcast(sess.ID, update)
+			}
+		case "pause":
+			sess.SetPaused(true)
+			data, _ := json.Marshal(pausedMsg{Type: "paused", Paused: true})
+			s.hub.Broadcast(sess.ID, data)
+		case "resume":
+			sess.SetPaused(false)
+			data, _ := json.Marshal(pausedMsg{Type: "paused", Paused: false})
+			s.hub.Broadcast(sess.ID, data)
+		}
+		sendStatus()
+	}
+}
+
+// handleSimulate injects transcript text directly into the matcher (for testing).
 func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code string) {
 	sess, ok := s.sessions.Get(code)
 	if !ok {
-		log.Printf("%s %s: simulate session not found join_code=%s", r.Method, r.URL.Path, code)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -250,9 +387,29 @@ func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code str
 		http.Error(w, `invalid body — expected {"text":"..."}`, http.StatusBadRequest)
 		return
 	}
-	msg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: req.Text})
-	s.hub.Broadcast(sess.ID, msg)
-	log.Printf("%s %s: simulated transcript join_code=%s text=%q", r.Method, r.URL.Path, code, req.Text)
+
+	// Echo transcript to all clients.
+	tmsg, _ := json.Marshal(transcriptMsg{Type: "transcript", Text: req.Text})
+	s.hub.Broadcast(sess.ID, tmsg)
+
+	// Run matcher if not paused.
+	if !sess.Paused() {
+		m := s.sessionMatcher(sess.ID)
+		if result := m.Match(req.Text); result != nil {
+			sess.SetCursor(result.SeqIdx)
+			update, _ := json.Marshal(positionUpdate{
+				Type:      "position_update",
+				Act:       result.ActIdx,
+				Scene:     result.SceneIdx,
+				Line:      result.ID,
+				Timestamp: time.Now(),
+			})
+			s.hub.Broadcast(sess.ID, update)
+			log.Printf("simulate: matched line id=%d act=%d scene=%d", result.ID, result.ActIdx, result.SceneIdx)
+		}
+	}
+
+	log.Printf("simulate: text=%q join_code=%s", req.Text, code)
 	w.WriteHeader(http.StatusNoContent)
 }
 

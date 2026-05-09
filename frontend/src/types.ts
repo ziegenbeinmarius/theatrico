@@ -22,6 +22,9 @@ export interface Script {
 export interface SessionInfo {
   join_code: string;
   script: Script;
+  cursor: number;
+  paused: boolean;
+  clients: number;
 }
 
 export interface CreateSessionResponse {
@@ -36,3 +39,22 @@ export interface PositionUpdate {
   line: number;
   timestamp: string;
 }
+
+export interface PausedUpdate {
+  type: 'paused';
+  paused: boolean;
+}
+
+export interface TranscriptUpdate {
+  type: 'transcript';
+  text: string;
+}
+
+export interface StatusMsg {
+  type: 'status';
+  cursor: number;
+  paused: boolean;
+  clients: number;
+}
+
+export type WsMessage = PositionUpdate | PausedUpdate | TranscriptUpdate | StatusMsg;

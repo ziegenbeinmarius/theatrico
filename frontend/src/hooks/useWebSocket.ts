@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { PositionUpdate } from '../types';
+import { PositionUpdate, WsMessage } from '../types';
 
 type Status = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 interface UseWebSocketResult {
   status: Status;
   lastPosition: PositionUpdate | null;
+  lastPaused: boolean | null;
+  send: (data: unknown) => void;
 }
 
-export function useWebSocket(sessionCode: string | undefined): UseWebSocketResult {
+export function useWebSocket(sessionCode: string | undefined, path = 'ws'): UseWebSocketResult {
   const normalizedCode = sessionCode?.trim().toUpperCase();
   const [status, setStatus] = useState<Status>(normalizedCode ? 'connecting' : 'disconnected');
   const [lastPosition, setLastPosition] = useState<PositionUpdate | null>(null);
+  const [lastPaused, setLastPaused] = useState<boolean | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmounted = useRef(false);
@@ -23,9 +26,9 @@ export function useWebSocket(sessionCode: string | undefined): UseWebSocketResul
     }
     if (unmounted.current) return;
 
-    setStatus(status => (status === 'connected' ? 'connected' : 'connecting'));
+    setStatus(s => (s === 'connected' ? 'connected' : 'connecting'));
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${window.location.host}/api/sessions/${normalizedCode}/ws`;
+    const url = `${proto}://${window.location.host}/api/sessions/${normalizedCode}/${path}`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
@@ -35,13 +38,10 @@ export function useWebSocket(sessionCode: string | undefined): UseWebSocketResul
 
     ws.onmessage = (evt) => {
       try {
-        const msg = JSON.parse(evt.data) as PositionUpdate;
-        if (msg.type === 'position_update') {
-          setLastPosition(msg);
-        }
-      } catch {
-        // ignore malformed messages
-      }
+        const msg = JSON.parse(evt.data) as WsMessage;
+        if (msg.type === 'position_update') setLastPosition(msg as PositionUpdate);
+        if (msg.type === 'paused') setLastPaused((msg as { paused: boolean }).paused);
+      } catch { /* ignore */ }
     };
 
     ws.onclose = () => {
@@ -55,11 +55,12 @@ export function useWebSocket(sessionCode: string | undefined): UseWebSocketResul
     ws.onerror = () => {
       ws.close();
     };
-  }, [normalizedCode]);
+  }, [normalizedCode, path]);
 
   useEffect(() => {
     unmounted.current = false;
     setLastPosition(null);
+    setLastPaused(null);
     connect();
     return () => {
       unmounted.current = true;
@@ -68,5 +69,11 @@ export function useWebSocket(sessionCode: string | undefined): UseWebSocketResul
     };
   }, [connect]);
 
-  return { status, lastPosition };
+  const send = useCallback((data: unknown) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(data));
+    }
+  }, []);
+
+  return { status, lastPosition, lastPaused, send };
 }

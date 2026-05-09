@@ -33,6 +33,13 @@ func (h *Hub) Unregister(sessionID string, c *Client) {
 	}
 }
 
+// ClientCount returns the number of audience clients connected to a session.
+func (h *Hub) ClientCount(sessionID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[sessionID])
+}
+
 func (h *Hub) Broadcast(sessionID string, msg []byte) {
 	h.mu.RLock()
 	targets := make([]*Client, 0, len(h.clients[sessionID]))
