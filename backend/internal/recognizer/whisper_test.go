@@ -93,7 +93,7 @@ func TestTranscribeRequestsVerboseJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rec := New("test-key")
+	rec := New("test-key").(*openAIWhisper)
 	rec.endpoint = server.URL
 
 	if _, err := rec.Transcribe([]byte("audio"), "webm", "en", ""); err != nil {
@@ -104,14 +104,14 @@ func TestTranscribeRequestsVerboseJSON(t *testing.T) {
 	}
 }
 
-func recognizerForResponse(t *testing.T, response transcriptionResponse) *Recognizer {
+func recognizerForResponse(t *testing.T, response transcriptionResponse) *openAIWhisper {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeTranscriptionResponse(t, w, response)
 	}))
 	t.Cleanup(server.Close)
 
-	rec := New("test-key")
+	rec := New("test-key").(*openAIWhisper)
 	rec.endpoint = server.URL
 	return rec
 }

@@ -33,7 +33,7 @@ type server struct {
 	defaultPlayID string
 	sessions      session.Repository
 	hub           *ws.Hub
-	rec           *recognizer.Recognizer
+	rec           recognizer.Recognizer
 	host          string
 	chunkDuration time.Duration
 	matchWindow    int
@@ -99,7 +99,17 @@ func main() {
 		matchMaxJump, _ = strconv.Atoi(s)
 	}
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	var rec recognizer.Recognizer
+	if addr := os.Getenv("WHISPER_CPP_ADDR"); addr != "" {
+		rec = recognizer.NewWhisperCpp(addr)
+		log.Printf("using whisper.cpp backend at %s", addr)
+	} else {
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			log.Printf("warning: OPENAI_API_KEY is not set; transcription will fail unless WHISPER_CPP_ADDR is configured")
+		}
+		rec = recognizer.New(apiKey)
+	}
 
 	scriptStore, err := script.NewFileStore(scriptsDir)
 	if err != nil {
@@ -121,7 +131,7 @@ func main() {
 		defaultPlayID:  defaultPlayID,
 		sessions:       session.NewMemoryStore(),
 		hub:            ws.NewHub(),
-		rec:            recognizer.New(apiKey),
+		rec:            rec,
 		host:           host,
 		chunkDuration:  chunkDuration,
 		matchWindow:    matchWindow,
