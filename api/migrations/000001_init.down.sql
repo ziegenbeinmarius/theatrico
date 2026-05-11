@@ -1,0 +1,1 @@
+-- Rollback initial migration placeholder

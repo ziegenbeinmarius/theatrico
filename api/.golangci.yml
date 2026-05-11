@@ -1,0 +1,29 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - godot
+    - noctx
+    - bodyclose
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/ziegenbeinmarius/theatrico/api
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck

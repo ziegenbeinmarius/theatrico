@@ -4,3 +4,14 @@ frontend/dist/
 frontend/node_modules/
 node_modules/
 .DS_Store
+
+# api
+api/bin/
+
+# web
+web/node_modules/
+web/.next/
+web/out/
+web/.env*.local
+web/tsconfig.tsbuildinfo
+
