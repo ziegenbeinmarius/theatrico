@@ -13,38 +13,22 @@ import (
 	"time"
 )
 
-const (
-	transcriptionEndpoint      = "https://api.openai.com/v1/audio/transcriptions"
-	noSpeechThreshold          = 0.6
-	confidentNoSpeechThreshold = 0.35
-	lowLogprobThreshold        = -1.0
-	highCompressionThreshold   = 2.4
-)
+const transcriptionEndpoint = "https://api.openai.com/v1/audio/transcriptions"
 
-type Recognizer struct {
+type openAIWhisper struct {
 	apiKey   string
 	client   *http.Client
 	endpoint string
 }
 
-func New(apiKey string) *Recognizer {
-	return &Recognizer{
+// New returns a Recognizer that transcribes via the OpenAI Whisper API.
+// apiKey is the OpenAI API key.
+func New(apiKey string) Recognizer {
+	return &openAIWhisper{
 		apiKey:   apiKey,
 		client:   &http.Client{Timeout: 30 * time.Second},
 		endpoint: transcriptionEndpoint,
 	}
-}
-
-type transcriptionResponse struct {
-	Text     string                 `json:"text"`
-	Segments []transcriptionSegment `json:"segments"`
-}
-
-type transcriptionSegment struct {
-	Text             string  `json:"text"`
-	AvgLogprob       float64 `json:"avg_logprob"`
-	CompressionRatio float64 `json:"compression_ratio"`
-	NoSpeechProb     float64 `json:"no_speech_prob"`
 }
 
 type apiError struct {
@@ -55,12 +39,7 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("whisper API status %d", e.status)
 }
 
-// Transcribe sends audio bytes to the Whisper API and returns transcript text.
-// format should be the file extension, e.g. "webm" or "wav".
-// language is an optional ISO-639-1 code (e.g. "de", "en"); empty means auto-detect.
-// prompt is optional previous transcript text passed as context for streaming chunks.
-// Retries up to 3 times on HTTP 429.
-func (r *Recognizer) Transcribe(audio []byte, format, language, prompt string) (string, error) {
+func (r *openAIWhisper) Transcribe(audio []byte, format, language, prompt string) (string, error) {
 	const maxRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -78,7 +57,7 @@ func (r *Recognizer) Transcribe(audio []byte, format, language, prompt string) (
 	return "", lastErr
 }
 
-func (r *Recognizer) transcribeOnce(audio []byte, format, language, prompt string) (string, error) {
+func (r *openAIWhisper) transcribeOnce(audio []byte, format, language, prompt string) (string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -144,62 +123,4 @@ func (r *Recognizer) transcribeOnce(audio []byte, format, language, prompt strin
 		return "", nil
 	}
 	return strings.TrimSpace(result.Text), nil
-}
-
-func shouldSuppressTranscript(result transcriptionResponse) bool {
-	text := strings.TrimSpace(result.Text)
-	if text == "" {
-		return true
-	}
-	if len(result.Segments) == 0 {
-		return false
-	}
-
-	textSegments := 0
-	silenceSegments := 0
-	confidentSpeechSegments := 0
-	for _, segment := range result.Segments {
-		if strings.TrimSpace(segment.Text) == "" {
-			continue
-		}
-		textSegments++
-		if isNoSpeechSegment(segment) {
-			silenceSegments++
-			continue
-		}
-		if isConfidentSpeechSegment(segment) {
-			confidentSpeechSegments++
-		}
-	}
-
-	if textSegments > 0 && textSegments == silenceSegments {
-		return true
-	}
-	if isCommonSilenceHallucination(text) && confidentSpeechSegments == 0 {
-		return true
-	}
-	return false
-}
-
-func isNoSpeechSegment(segment transcriptionSegment) bool {
-	if segment.NoSpeechProb >= noSpeechThreshold {
-		return true
-	}
-	return segment.AvgLogprob <= lowLogprobThreshold && segment.CompressionRatio >= highCompressionThreshold
-}
-
-func isConfidentSpeechSegment(segment transcriptionSegment) bool {
-	return segment.NoSpeechProb < confidentNoSpeechThreshold &&
-		segment.AvgLogprob > lowLogprobThreshold &&
-		(segment.CompressionRatio == 0 || segment.CompressionRatio <= highCompressionThreshold)
-}
-
-func isCommonSilenceHallucination(text string) bool {
-	normalized := strings.ToLower(strings.Trim(text, " \t\r\n.!?,;:\"'()[]{}"))
-	switch normalized {
-	case "you", "thank you":
-		return true
-	default:
-		return false
-	}
 }
