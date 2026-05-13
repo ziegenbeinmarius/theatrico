@@ -4,3 +4,19 @@ frontend/dist/
 frontend/node_modules/
 node_modules/
 .DS_Store
+
+# Native app (React Native / Expo)
+apps/native/ios/
+apps/native/android/
+apps/native/.expo/
+apps/native/expo-env.d.ts
+apps/native/.env
+apps/native/.env.local
+apps/native/dist/
+apps/native/build/
+apps/native/web-build/
+apps/native/*.jks
+apps/native/*.p8
+apps/native/*.p12
+apps/native/*.key
+apps/native/*.mobileprovision
