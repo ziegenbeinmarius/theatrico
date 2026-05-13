@@ -3,6 +3,7 @@ import { Upload, X, FileText, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { useUploadScriptMutation } from '../hooks/useSessions';
+import { PlayDetail } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -71,7 +72,7 @@ export function ScriptUploadModal({ onClose, onUploaded }: Props) {
 
   function handleSubmit() {
     if (!file || !title.trim()) return;
-    upload.mutate({ file, title: title.trim() }, { onSuccess: (data) => onUploaded(data.id) });
+    upload.mutate({ file, title: title.trim() }, { onSuccess: (data: PlayDetail) => onUploaded(data.id) });
   }
 
   useEffect(() => {

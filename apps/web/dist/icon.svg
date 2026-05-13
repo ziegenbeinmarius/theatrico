@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Theatrico">
-  <rect width="512" height="512" rx="96" fill="#130f13"/>
-  <path d="M96 120h320v168c0 88-72 160-160 160S96 376 96 288V120Z" fill="#f4efe7"/>
-  <path d="M132 156h248v132c0 69-55 124-124 124s-124-55-124-124V156Z" fill="#8f1d2c"/>
-  <path d="M172 230c20-18 48-18 68 0M272 230c20-18 48-18 68 0" fill="none" stroke="#f8d67a" stroke-width="22" stroke-linecap="round"/>
-  <path d="M202 318c31 28 77 28 108 0" fill="none" stroke="#f8d67a" stroke-width="22" stroke-linecap="round"/>
-</svg>
