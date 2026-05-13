@@ -624,7 +624,7 @@ export function OperatorPage() {
             </Card>
 
             {/* Script management */}
-            {!session && playsQuery.data && playsQuery.data.filter((p) => p.id !== 'default').length > 0 && (
+            {!session && playsQuery.data && playsQuery.data.filter((p: PlayInfo) => p.id !== 'default').length > 0 && (
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
@@ -635,8 +635,8 @@ export function OperatorPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {playsQuery.data
-                    .filter((p) => p.id !== 'default')
-                    .map((p) => (
+                    .filter((p: PlayInfo) => p.id !== 'default')
+                    .map((p: PlayInfo) => (
                       <div
                         key={p.id}
                         className="flex items-center justify-between rounded-md bg-black/20 px-3 py-2"
