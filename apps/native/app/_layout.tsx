@@ -14,7 +14,7 @@ export default function RootLayout() {
           <SpeechRecognizerProvider>
             <Stack
               screenOptions={{
-                headerStyle: { backgroundColor: '#1a1a2e' },
+                headerStyle: { backgroundColor: '#130f12' },
                 headerTintColor: '#ffffff',
                 headerTitleStyle: { fontWeight: 'bold' },
               }}

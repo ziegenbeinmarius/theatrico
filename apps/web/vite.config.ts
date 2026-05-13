@@ -38,6 +38,7 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         "@": new URL("./src", import.meta.url).pathname,
+        "@theatrico/shared": new URL("../../packages/shared/src/index.ts", import.meta.url).pathname,
       },
     },
     server: {

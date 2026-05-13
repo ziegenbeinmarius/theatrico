@@ -9,6 +9,9 @@
     "paths": {
       "@/*": [
         "src/*"
+      ],
+      "@theatrico/shared": [
+        "../../packages/shared/src/index.ts"
       ]
     }
   },
