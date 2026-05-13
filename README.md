@@ -4,8 +4,12 @@ Real-time theater script prompter. An operator mic captures audio, a Go backend 
 
 ## Structure
 
+This is a pnpm workspaces monorepo:
+
 - `backend/` — Go API server, script parser, session management, WebSocket hub, audio receiver, Whisper recognizer.
-- `frontend/` — Vite React TypeScript PWA using React Query, Tailwind CSS, and shadcn-style UI primitives.
+- `apps/web/` — Vite React TypeScript PWA using React Query, Tailwind CSS, and shadcn-style UI primitives.
+- `apps/native/` — Placeholder for theatrico-native React Native app.
+- `packages/shared/` — Placeholder for shared TypeScript code between web and native.
 - `AGENTS.md` — architecture and implementation notes for future agents.
 
 ## Backend
@@ -26,16 +30,23 @@ The server listens on `http://localhost:8080` by default.
 | `PORT` | `8080` | HTTP port |
 | `HOST` | `localhost:{PORT}` | Public host used in QR join URLs |
 | `SCRIPT_PATH` | `scripts/default.md` | Markdown script path |
-| `FRONTEND_DIST` | `../frontend/dist` | Static frontend build directory |
+| `FRONTEND_DIST` | `../apps/web/dist` | Static frontend build directory |
 
 You can also place a `.env` file in `backend/` or the project root.
 
-## Frontend
+## Frontend (Web)
 
 ```sh
-cd frontend
+cd apps/web
 npm install
 npm run dev
+```
+
+Or from the repo root using pnpm workspaces:
+
+```sh
+pnpm install
+pnpm dev
 ```
 
 The Vite dev server proxies `/api` and websocket requests to the Go backend.
@@ -43,8 +54,10 @@ The Vite dev server proxies `/api` and websocket requests to the Go backend.
 Build the installable PWA:
 
 ```sh
-cd frontend
+cd apps/web
 npm run build
+# or from root:
+pnpm build
 ```
 
 After building, `cd backend && go run ./cmd/server` serves the PWA and API on one port.

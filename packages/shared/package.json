@@ -1,0 +1,8 @@
+{
+  "name": "@theatrico/shared",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Placeholder for shared TypeScript code between web and native",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

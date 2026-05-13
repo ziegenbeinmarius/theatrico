@@ -201,7 +201,7 @@ func main() {
 
 	frontendDist := os.Getenv("FRONTEND_DIST")
 	if frontendDist == "" {
-		frontendDist = "../frontend/dist"
+		frontendDist = "../apps/web/dist"
 	}
 	mux.Handle("/", spaFileServer(frontendDist))
 
