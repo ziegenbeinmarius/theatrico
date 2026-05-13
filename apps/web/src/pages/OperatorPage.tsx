@@ -668,7 +668,7 @@ export function OperatorPage() {
               onLineClick={handleLineClick}
               annotationMap={annotationScriptId ? annotationMap : undefined}
               onAnnotationClick={annotationScriptId ? handleAnnotationClick : undefined}
-              showAnnotationsInline
+              showAnnotationsSplit
             />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -814,7 +814,7 @@ export function OperatorPage() {
                     fontSize="sm"
                     annotationMap={annotationScriptId ? annotationMap : undefined}
                     onAnnotationClick={annotationScriptId ? handleAnnotationClick : undefined}
-                    showAnnotationsInline
+                    showAnnotationsSplit
                   />
                 </CardContent>
               </Card>
