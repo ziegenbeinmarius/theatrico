@@ -10,12 +10,18 @@ export type {
 } from '@theatrico/shared';
 
 // Web-specific WebSocket message shapes (backend wire format for the web WS endpoint)
+export interface CueInfo {
+  id: number;
+  content: string;
+}
+
 export interface PositionUpdate {
   type: 'position_update';
   act: number;
   scene: number;
   line: number;
   timestamp: string;
+  cues?: CueInfo[];
 }
 
 export interface PausedUpdate {

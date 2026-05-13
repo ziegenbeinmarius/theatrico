@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { FlatList } from 'react-native';
+import type { Annotation } from '@theatrico/shared';
 import type { FlatLine } from '@/lib/scriptUtils';
 import type { Position } from '@/domain';
 import { LineItem, type ScriptListItem } from '@/components/LineItem';
@@ -7,11 +8,13 @@ import { LineItem, type ScriptListItem } from '@/components/LineItem';
 function buildScriptItems(
   flatLines: FlatLine[],
   currentPosition: Position | null,
+  annotationMap?: Map<number, Annotation[]>,
 ): { items: ScriptListItem[]; activeIndex: number } {
   const items: ScriptListItem[] = [];
   let lastActId = '';
   let lastSceneId = '';
   let activeIndex = -1;
+  let seqIdx = 0;
 
   for (const fl of flatLines) {
     if (fl.act.id !== lastActId) {
@@ -25,7 +28,15 @@ function buildScriptItems(
     }
     const isActive = currentPosition?.lineId === fl.line.id;
     if (isActive) activeIndex = items.length;
-    items.push({ type: 'line', id: fl.line.id, flatLine: fl, isActive });
+    items.push({
+      type: 'line',
+      id: fl.line.id,
+      flatLine: fl,
+      isActive,
+      seqIdx,
+      annotations: annotationMap?.get(seqIdx),
+    });
+    seqIdx++;
   }
 
   return { items, activeIndex };
@@ -34,11 +45,13 @@ function buildScriptItems(
 interface Props {
   flatLines: FlatLine[];
   currentPosition: Position | null;
+  annotationMap?: Map<number, Annotation[]>;
+  onAnnotationPress?: (seqIdx: number, annotations: Annotation[]) => void;
 }
 
-export function ScriptView({ flatLines, currentPosition }: Props) {
+export function ScriptView({ flatLines, currentPosition, annotationMap, onAnnotationPress }: Props) {
   const listRef = useRef<FlatList<ScriptListItem>>(null);
-  const { items, activeIndex } = buildScriptItems(flatLines, currentPosition);
+  const { items, activeIndex } = buildScriptItems(flatLines, currentPosition, annotationMap);
 
   useEffect(() => {
     if (activeIndex < 0 || items.length === 0) return;
@@ -54,7 +67,9 @@ export function ScriptView({ flatLines, currentPosition }: Props) {
       ref={listRef}
       data={items}
       keyExtractor={(item) => item.id}
-      renderItem={({ item }) => <LineItem item={item} />}
+      renderItem={({ item }) => (
+        <LineItem item={item} onAnnotationPress={onAnnotationPress} />
+      )}
       contentContainerClassName="py-4 pb-16"
       onScrollToIndexFailed={(info) => {
         listRef.current?.scrollToOffset({

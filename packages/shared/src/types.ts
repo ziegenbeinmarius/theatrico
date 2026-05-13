@@ -1,3 +1,23 @@
+// ─── Annotation types ─────────────────────────────────────────────────────────
+
+export type AnnotationType = 'note' | 'cue';
+export type CueType = 'lighting' | 'sound' | 'stage_direction' | 'custom';
+
+export interface CueContent {
+  cue_type: CueType;
+  description: string;
+}
+
+export interface Annotation {
+  id: number;
+  script_id: string;
+  line_index: number;
+  type: AnnotationType;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export type LineType = 'dialogue' | 'action' | 'stage_direction';
@@ -44,6 +64,7 @@ export interface Session {
   id: string;
   code: string;
   playId: string;
+  scriptId: string;
   status: SessionStatus;
   currentPosition: Position | null;
   play?: Play;
@@ -81,6 +102,7 @@ export interface RawCreateSession {
 
 export interface RawGetSession {
   join_code: string;
+  script_id: string;
   script: RawScript;
   cursor: number;
   paused: boolean;
@@ -144,12 +166,18 @@ export function cursorToPosition(play: Play, cursor: number): Position | null {
 
 // ─── WebSocket message types ──────────────────────────────────────────────────
 
+export interface WsCueInfo {
+  id: number;
+  content: string;
+}
+
 export interface PositionUpdateMessage {
   type: 'position_update';
   line?: number;
   act?: number;
   scene?: number;
   position?: Position;
+  cues?: WsCueInfo[];
 }
 
 export interface TranscriptMessage {

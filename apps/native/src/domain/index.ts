@@ -11,6 +11,7 @@ export type {
   TranscriptMessage,
   ErrorMessage,
   SessionMessage,
+  WsCueInfo,
   ITheatricoClient,
   ISessionWebSocket,
   IAudioWebSocket,

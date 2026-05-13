@@ -1,24 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Clapperboard, ExternalLink, Mic, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
-  Pause, Play, Users, Upload, Trash2,
+  BookOpen, Clapperboard, ExternalLink, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
+  Pause, Play, Users,
 } from 'lucide-react';
-import { QRCodeDisplay } from '../components/QRCodeDisplay';
+import type { Annotation } from '@theatrico/shared';
+import { AnnotationModal } from '../components/AnnotationModal';
 import { ScriptRenderer } from '../components/ScriptRenderer';
-import { ScriptUploadModal } from '../components/ScriptUploadModal';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
+  useAnnotationsQuery,
+  useCreateAnnotationMutation,
+  useUpdateAnnotationMutation,
+  useDeleteAnnotationMutation,
+  buildAnnotationMap,
+} from '../hooks/useAnnotations';
+import {
   useCreateSessionMutation,
-  useDeleteScriptMutation,
   useScriptsQuery,
   useScriptQuery,
   useSessionQuery,
 } from "../hooks/useSessions";
 import {
   CreateSessionResponse,
+  CueInfo,
   PlayInfo,
   PositionUpdate,
   StatusMsg,
@@ -105,9 +113,7 @@ type WebAudioWindow = Window & typeof globalThis & {
 export function OperatorPage() {
   const scriptsQuery = useScriptsQuery();
   const createSession = useCreateSessionMutation();
-  const deleteScript = useDeleteScriptMutation();
   const [joinCode, setJoinCode] = useState<string | null>(null);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const sessionQuery = useSessionQuery(joinCode ?? undefined);
   const session = sessionQuery.data ?? null;
 
@@ -126,6 +132,24 @@ export function OperatorPage() {
   const [streamError, setStreamError] = useState('');
 
   const displayScript = session?.script ?? scriptQuery.data?.script ?? null;
+
+  const annotationScriptId = selectedScript || undefined;
+  const annotationsQuery = useAnnotationsQuery(annotationScriptId);
+  const annotationMap = buildAnnotationMap(annotationsQuery.data);
+  const createAnnotation = useCreateAnnotationMutation(annotationScriptId ?? '');
+  const updateAnnotation = useUpdateAnnotationMutation(annotationScriptId ?? '');
+  const deleteAnnotation = useDeleteAnnotationMutation(annotationScriptId ?? '');
+
+  // Annotation modal state
+  interface AnnotationTarget {
+    seqIdx: number;
+    lineLabel: string;
+    annotations: Annotation[];
+  }
+  const [annotationTarget, setAnnotationTarget] = useState<AnnotationTarget | null>(null);
+
+  // Cue overlay — shown when the live cursor hits a line with cue annotations
+  const [activeCues, setActiveCues] = useState<CueInfo[]>([]);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioWsRef = useRef<WebSocket | null>(null);
@@ -147,7 +171,10 @@ export function OperatorPage() {
   const { lastPosition } = useWebSocket(session?.join_code, 'ws');
 
   useEffect(() => {
-    if (lastPosition) setPosition(lastPosition);
+    if (lastPosition) {
+      setPosition(lastPosition);
+      setActiveCues(lastPosition.cues ?? []);
+    }
   }, [lastPosition]);
 
   const operatorWsRef = useRef<WebSocket | null>(null);
@@ -164,7 +191,11 @@ export function OperatorPage() {
           setClients(s.clients);
           setPaused(s.paused);
         }
-        if (msg.type === 'position_update') setPosition(msg as PositionUpdate);
+        if (msg.type === 'position_update') {
+          const pos = msg as PositionUpdate;
+          setPosition(pos);
+          setActiveCues(pos.cues ?? []);
+        }
       } catch { /* ignore */ }
     };
     return () => ws.close();
@@ -451,17 +482,232 @@ export function OperatorPage() {
     sendControl({ type: 'force_position', line: seqIdx });
   }
 
+  function handleAnnotationClick(seqIdx: number, annotations: Annotation[]) {
+    if (!displayScript || !annotationScriptId) return;
+    // Build a label: "CHARACTER · first 50 chars of line text"
+    let lineLabel = `Line ${seqIdx + 1}`;
+    let idx = 0;
+    outer: for (const act of displayScript.acts) {
+      for (const scene of act.scenes) {
+        for (const line of scene.lines) {
+          if (idx === seqIdx) {
+            const charPart = line.character ? `${line.character} · ` : '';
+            lineLabel = `${charPart}${line.text.slice(0, 60)}${line.text.length > 60 ? '…' : ''}`;
+            break outer;
+          }
+          idx++;
+        }
+      }
+    }
+    setAnnotationTarget({ seqIdx, lineLabel, annotations });
+  }
+
+  function handleAnnotationSave(type: string, content: string) {
+    if (!annotationTarget || !annotationScriptId) return;
+    const existing = annotationTarget.annotations[0] ?? null;
+    if (existing) {
+      updateAnnotation.mutate(
+        { id: existing.id, type, content },
+        { onSuccess: () => setAnnotationTarget(null) },
+      );
+    } else {
+      createAnnotation.mutate(
+        { lineIndex: annotationTarget.seqIdx, type, content },
+        { onSuccess: () => setAnnotationTarget(null) },
+      );
+    }
+  }
+
+  function handleAnnotationDelete(id: number) {
+    if (!annotationScriptId) return;
+    deleteAnnotation.mutate(id, { onSuccess: () => setAnnotationTarget(null) });
+  }
+
   function togglePause() {
     const next = !paused;
     sendControl({ type: next ? 'pause' : 'resume' });
     setPaused(next);
   }
 
-  const totalScenes = displayScript?.acts.reduce(
-    (total: number, act: import("../types").ScriptAct) => total + act.scenes.length,
-    0,
-  ) ?? 0;
+  // ─── Session view ─────────────────────────────────────────────────────────────
+  if (session) {
+    return (
+      <main className="h-screen overflow-hidden flex flex-col bg-[radial-gradient(circle_at_top_left,rgba(143,29,44,0.25),transparent_32rem),linear-gradient(135deg,#130f13_0%,#211318_45%,#101716_100%)]">
+        {/* Compact top toolbar */}
+        <header className="shrink-0 border-b border-border bg-[#130f13]/90 backdrop-blur px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {/* Script title */}
+            <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
+              <Clapperboard className="w-3.5 h-3.5 text-secondary shrink-0" aria-hidden="true" />
+              <span className="truncate max-w-[12rem]">{displayScript?.title ?? 'Session'}</span>
+            </div>
 
+            <span className="text-border hidden sm:block">|</span>
+
+            {/* Join code + QR external link */}
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-bold text-secondary tracking-widest">{session.join_code}</span>
+              <a
+                href={`/qr/${session.join_code}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground hover:border-foreground/30"
+              >
+                <ExternalLink className="w-2.5 h-2.5" />
+                QR
+              </a>
+            </div>
+
+            <span className="text-border hidden sm:block">|</span>
+
+            {/* Audience */}
+            <Badge variant="outline" className="gap-1 text-xs">
+              <Users className="w-3 h-3" />
+              {clients}
+            </Badge>
+
+            {/* Position */}
+            {position && (
+              <span className="text-xs text-muted-foreground hidden md:block">
+                Act {position.act + 1} · Sc {position.scene + 1} · L {position.line}
+              </span>
+            )}
+
+            {/* Controls: right side */}
+            <div className="flex items-center gap-2 ml-auto">
+              {/* Mic device selector — only when not streaming */}
+              {!streaming && (
+                <select
+                  value={selectedDeviceId}
+                  onChange={(e) => setSelectedDeviceId(e.target.value)}
+                  disabled={streamStarting}
+                  className="h-7 max-w-[10rem] px-2 py-0 text-xs border rounded border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 hidden sm:block"
+                >
+                  {devices.length === 0 && <option value="">Default mic</option>}
+                  {devices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* Mic start / stop */}
+              {!streaming ? (
+                <Button size="sm" onClick={startStreaming} disabled={streamStarting} className="h-7 gap-1.5 text-xs px-2.5">
+                  {streamStarting
+                    ? <RefreshCw className="w-3 h-3 animate-spin" aria-hidden="true" />
+                    : <Radio className="w-3 h-3" aria-hidden="true" />}
+                  {streamStarting ? 'Starting…' : 'Start mic'}
+                </Button>
+              ) : (
+                <Button variant="destructive" size="sm" onClick={stopStreaming} className="h-7 gap-1.5 text-xs px-2.5">
+                  <StopCircle className="w-3 h-3" aria-hidden="true" />
+                  Stop mic
+                  <span className="relative flex w-1.5 h-1.5 ml-0.5">
+                    <span className="absolute inline-flex w-full h-full bg-green-400 rounded-full opacity-75 animate-ping" />
+                    <span className="relative inline-flex w-1.5 h-1.5 bg-green-400 rounded-full" />
+                  </span>
+                </Button>
+              )}
+
+              {/* Pause / Resume */}
+              <Button
+                variant={paused ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={togglePause}
+                className="h-7 gap-1.5 text-xs px-2.5"
+              >
+                {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+                {paused ? 'Resume' : 'Pause'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Stream error inline */}
+          {streamError && (
+            <p className="mt-1 text-xs text-destructive">{streamError}</p>
+          )}
+        </header>
+
+        {/* Active cue banners */}
+        {activeCues.length > 0 && (
+          <div className="shrink-0 border-b border-amber-500/20 bg-amber-950/30 px-3 py-1.5 space-y-1">
+            {activeCues.map((cue) => {
+              let label = cue.content;
+              let icon = '⚡';
+              try {
+                const parsed = JSON.parse(cue.content) as { cue_type: string; description: string };
+                const icons: Record<string, string> = { lighting: '💡', sound: '🔊', stage_direction: '🎭', custom: '⚡' };
+                icon = icons[parsed.cue_type] ?? '⚡';
+                label = parsed.description;
+              } catch { /* raw string */ }
+              return (
+                <div key={cue.id} className="flex items-center gap-2 text-sm text-amber-300">
+                  <span className="shrink-0">{icon}</span>
+                  <span className="font-medium">CUE:</span>
+                  <span>{label}</span>
+                  <button
+                    className="ml-auto shrink-0 text-amber-400/60 hover:text-amber-300 transition-colors px-1"
+                    onClick={() => setActiveCues((prev) => prev.filter((c) => c.id !== cue.id))}
+                    title="Dismiss"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Script — fills remaining space */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {displayScript ? (
+            <ScriptRenderer
+              script={displayScript}
+              highlightedLine={position}
+              fontSize="sm"
+              onLineClick={handleLineClick}
+              annotationMap={annotationScriptId ? annotationMap : undefined}
+              onAnnotationClick={annotationScriptId ? handleAnnotationClick : undefined}
+              showAnnotationsSplit
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Loading script…
+            </div>
+          )}
+        </div>
+
+        {/* Transcript strip — bottom */}
+        <div className="shrink-0 border-t border-border bg-black/20 px-4 py-2">
+          <p className="mb-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Live transcript
+          </p>
+          <div className="overflow-y-auto max-h-[4.5rem] text-sm leading-relaxed text-muted-foreground">
+            {transcripts.length === 0 ? (
+              <span className="text-muted-foreground/60">Transcript appears here once mic is started…</span>
+            ) : (
+              transcripts.map((t, i) => <p key={i} className="mb-0.5">{t}</p>)
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
+        </div>
+
+        {annotationTarget && annotationScriptId && (
+          <AnnotationModal
+            annotation={annotationTarget.annotations[0] ?? null}
+            lineIndex={annotationTarget.seqIdx}
+            lineLabel={annotationTarget.lineLabel}
+            onSave={(type, content) => handleAnnotationSave(type, content)}
+            onDelete={annotationTarget.annotations[0] ? handleAnnotationDelete : undefined}
+            onClose={() => setAnnotationTarget(null)}
+            isPending={createAnnotation.isPending || updateAnnotation.isPending || deleteAnnotation.isPending}
+          />
+        )}
+      </main>
+    );
+  }
+
+  // ─── Pre-session setup view ────────────────────────────────────────────────
   return (
     <main className="h-screen overflow-hidden flex flex-col bg-[radial-gradient(circle_at_top_left,rgba(143,29,44,0.25),transparent_32rem),linear-gradient(135deg,#130f13_0%,#211318_45%,#101716_100%)] px-4 py-8 sm:px-6">
       <div className="mx-auto w-full max-w-[90rem] flex flex-col gap-6 flex-1 min-h-0">
@@ -471,367 +717,104 @@ export function OperatorPage() {
             <Clapperboard className="w-5 h-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-normal">
-              Theatrico
-            </h1>
+            <h1 className="text-3xl font-semibold tracking-normal">Theatrico</h1>
             <p className="text-sm text-muted-foreground">Operator console</p>
           </div>
-          {session && (
-            <div className="flex items-center gap-2 ml-auto">
-              <Badge variant="outline" className="gap-1.5">
-                <Users className="w-3 h-3" />
-                {clients} audience
-              </Badge>
-            </div>
-          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[28rem_1fr] flex-1 min-h-0">
-          {/* Left column */}
+          {/* Left column: session setup */}
           <div className="flex flex-col gap-4 overflow-y-auto">
-            {/* Session / QR card */}
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <CardTitle>Live session</CardTitle>
-                    <CardDescription>
-                      Create a join code for audience devices.
-                    </CardDescription>
+                    <CardTitle>New session</CardTitle>
+                    <CardDescription>Create a join code for audience devices.</CardDescription>
                   </div>
-                  <Badge variant={session ? "secondary" : "muted"}>
-                    {session ? "Active" : "Ready"}
-                  </Badge>
+                  <Badge variant="muted">Ready</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {session ? (
-                  <>
-                    <QRCodeDisplay joinCode={session.join_code} />
-                    <a
-                      href={`/qr/${session.join_code}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="text-sm text-muted-foreground">
+                      Play <span className="text-destructive">*</span>
+                    </label>
+                    <Link
+                      to="/scripts"
+                      className="flex items-center gap-1 text-xs transition-colors text-muted-foreground hover:text-foreground"
                     >
-                      <ExternalLink className="w-3 h-3" />
-                      Open display view
-                    </a>
-                    {/* Compact script meta */}
-                    {displayScript && (
-                      <div className="px-3 py-2 space-y-1 text-xs rounded-md bg-black/20 text-muted-foreground">
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5">
-                            <ScrollText className="w-3 h-3" />
-                            {displayScript.title}
-                          </span>
-                          <span>
-                            {displayScript.acts.length} acts · {totalScenes}{" "}
-                            scenes
-                          </span>
-                        </div>
-                        {session.language && (
-                          <div className="text-xs">
-                            Language:{" "}
-                            <span className="text-foreground">
-                              {LANGUAGES.find(
-                                (l) => l.code === session.language,
-                              )?.label ?? session.language}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <label className="text-sm text-muted-foreground">
-                          Play <span className="text-destructive">*</span>
-                        </label>
-                        <button
-                          onClick={() => setShowUploadModal(true)}
-                          className="flex items-center gap-1 text-xs transition-colors text-muted-foreground hover:text-foreground"
-                        >
-                          <Upload className="w-3 h-3" />
-                          Upload Script
-                        </button>
-                      </div>
-                      <select
-                        value={selectedScript}
-                        onChange={(e) => setSelectedScript(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                      >
-                        <option value="" disabled>
-                          Select a play…
-                        </option>
-                        {scriptsQuery.data
-                          ?.filter((p: PlayInfo) => p.id !== "default")
-                          .map((p: PlayInfo) => (
-                            <option key={p.id} value={p.id}>
-                              {p.title}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-sm text-muted-foreground">
-                        Script language
-                      </label>
-                      <select
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                      >
-                        {LANGUAGES.map((l) => (
-                          <option key={l.code} value={l.code}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Sets the speech recognition language so Whisper doesn't
-                        switch unexpectedly.
-                      </p>
-                    </div>
-                    <Button
-                      size="lg"
-                      className="w-full"
-                      onClick={handleNewSession}
-                      disabled={createSession.isPending || !selectedScript}
-                    >
-                      {createSession.isPending ? (
-                        <RefreshCw
-                          className="w-5 h-5 animate-spin"
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <PlusCircle className="w-5 h-5" aria-hidden="true" />
-                      )}
-                      New Session
-                    </Button>
+                      <BookOpen className="w-3 h-3" />
+                      Manage scripts
+                    </Link>
                   </div>
-                )}
+                  <select
+                    value={selectedScript}
+                    onChange={(e) => setSelectedScript(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="" disabled>Select a play…</option>
+                    {scriptsQuery.data
+                      ?.filter((p: PlayInfo) => p.id !== 'default')
+                      .map((p: PlayInfo) => (
+                        <option key={p.id} value={p.id}>{p.title}</option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm text-muted-foreground">Script language</label>
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Sets the speech recognition language so Whisper doesn't switch unexpectedly.
+                  </p>
+                </div>
+                <Button
+                  size="lg"
+                  className="w-full"
+                  onClick={handleNewSession}
+                  disabled={createSession.isPending || !selectedScript}
+                >
+                  {createSession.isPending
+                    ? <RefreshCw className="w-5 h-5 animate-spin" aria-hidden="true" />
+                    : <PlusCircle className="w-5 h-5" aria-hidden="true" />}
+                  New Session
+                </Button>
                 {createSession.isError && (
                   <p className="text-sm text-destructive">
-                    {createSession.error instanceof Error
-                      ? createSession.error.message
-                      : "Failed to create session."}
+                    {createSession.error instanceof Error ? createSession.error.message : 'Failed to create session.'}
                   </p>
                 )}
               </CardContent>
             </Card>
-
-            {/* Script management */}
-            {!session &&
-              scriptsQuery.data &&
-              scriptsQuery.data.filter((p: PlayInfo) => p.id !== "default")
-                .length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <ScrollText
-                        className="w-5 h-5 text-secondary"
-                        aria-hidden="true"
-                      />
-                      <CardTitle>Scripts</CardTitle>
-                    </div>
-                    <CardDescription>Manage uploaded scripts.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {scriptsQuery.data
-                      .filter((p: PlayInfo) => p.id !== "default")
-                      .map((p: PlayInfo) => (
-                        <div
-                          key={p.id}
-                          className="flex items-center justify-between px-3 py-2 rounded-md bg-black/20"
-                        >
-                          <span className="text-sm truncate">{p.title}</span>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Delete "${p.title}"?`)) {
-                                deleteScript.mutate(p.id, {
-                                  onSuccess: () => {
-                                    if (selectedScript === p.id)
-                                      setSelectedScript("");
-                                  },
-                                });
-                              }
-                            }}
-                            disabled={deleteScript.isPending}
-                            className="ml-2 transition-colors shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
-                            title="Delete script"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    {deleteScript.isError && (
-                      <p className="text-xs text-destructive">
-                        {deleteScript.error instanceof Error
-                          ? deleteScript.error.message
-                          : "Delete failed."}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-            {/* Microphone / streaming */}
-            {session && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Mic
-                      className="w-5 h-5 text-secondary"
-                      aria-hidden="true"
-                    />
-                    <CardTitle>Microphone</CardTitle>
-                  </div>
-                  <CardDescription>
-                    Select input device and stream audio to Whisper.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <select
-                    value={selectedDeviceId}
-                    onChange={(e) => setSelectedDeviceId(e.target.value)}
-                    disabled={streaming || streamStarting}
-                    className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                  >
-                    {devices.length === 0 && (
-                      <option value="">Default microphone</option>
-                    )}
-                    {devices.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId}>
-                        {d.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="flex items-center gap-3">
-                    {!streaming ? (
-                      <Button
-                        onClick={startStreaming}
-                        className="gap-2"
-                        disabled={streamStarting}
-                      >
-                        {streamStarting ? (
-                          <RefreshCw
-                            className="w-4 h-4 animate-spin"
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <Radio className="w-4 h-4" aria-hidden="true" />
-                        )}
-                        {streamStarting ? "Starting..." : "Start Streaming"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="destructive"
-                        onClick={stopStreaming}
-                        className="gap-2"
-                      >
-                        <StopCircle className="w-4 h-4" aria-hidden="true" />
-                        Stop Streaming
-                      </Button>
-                    )}
-                    {streaming && (
-                      <span className="flex items-center gap-1.5 text-sm text-green-400">
-                        <span className="relative flex w-2 h-2">
-                          <span className="absolute inline-flex w-full h-full bg-green-400 rounded-full opacity-75 animate-ping" />
-                          <span className="relative inline-flex w-2 h-2 bg-green-400 rounded-full" />
-                        </span>
-                        Live
-                      </span>
-                    )}
-                  </div>
-                  {streamError && (
-                    <p className="text-sm text-destructive">{streamError}</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
           </div>
 
-          {/* Right column: transcript + script */}
+          {/* Right column: script preview */}
           <div className="flex flex-col min-h-0 overflow-hidden">
             {displayScript && (
               <Card className="flex flex-col flex-1 min-h-0 overflow-hidden">
                 <CardHeader className="shrink-0">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <ScrollText
-                        className="w-5 h-5 text-secondary"
-                        aria-hidden="true"
-                      />
-                      <CardTitle>
-                        {session ? "Click to Jump" : "Script Preview"}
-                      </CardTitle>
-                    </div>
-                    {session && (
-                      <Button
-                        variant={paused ? "secondary" : "outline"}
-                        size="sm"
-                        onClick={togglePause}
-                        className="gap-1.5 shrink-0"
-                      >
-                        {paused ? (
-                          <>
-                            <Play className="h-3.5 w-3.5" />
-                            Resume Auto-Match
-                          </>
-                        ) : (
-                          <>
-                            <Pause className="h-3.5 w-3.5" />
-                            Pause Auto-Match
-                          </>
-                        )}
-                      </Button>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <ScrollText className="w-5 h-5 text-secondary" aria-hidden="true" />
+                    <CardTitle>Script Preview</CardTitle>
                   </div>
-                  <CardDescription className="text-xs">
-                    {session
-                      ? "Click a line to force the cursor there."
-                      : "Start a session to enable cursor control."}
-                    {position && (
-                      <span className="ml-2 text-muted-foreground">
-                        · Act {position.act + 1} · Scene {position.scene + 1} ·
-                        Line {position.line}
-                      </span>
-                    )}
-                  </CardDescription>
+                  <CardDescription className="text-xs">Start a session to enable cursor control.</CardDescription>
                 </CardHeader>
-
-                {/* Transcript strip — visible only when a session is active */}
-                {session && (
-                  <div className="px-4 pb-3 border-b shrink-0 border-border">
-                    <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Live transcript
-                    </p>
-                    <div className="px-3 py-2 overflow-y-auto text-sm leading-relaxed rounded-md max-h-24 bg-black/30">
-                      {transcripts.length === 0 ? (
-                        <span className="text-muted-foreground">
-                          Transcript will appear here once streaming starts…
-                        </span>
-                      ) : (
-                        transcripts.map((t, i) => (
-                          <p key={i} className="mb-0.5">
-                            {t}
-                          </p>
-                        ))
-                      )}
-                      <div ref={transcriptEndRef} />
-                    </div>
-                  </div>
-                )}
-
                 <CardContent className="flex-1 min-h-0 p-0 overflow-y-auto">
                   <ScriptRenderer
                     script={displayScript}
-                    highlightedLine={position}
                     fontSize="sm"
-                    onLineClick={session ? handleLineClick : undefined}
+                    annotationMap={annotationScriptId ? annotationMap : undefined}
+                    onAnnotationClick={annotationScriptId ? handleAnnotationClick : undefined}
+                    showAnnotationsSplit
                   />
                 </CardContent>
               </Card>
@@ -839,13 +822,16 @@ export function OperatorPage() {
           </div>
         </div>
       </div>
-      {showUploadModal && (
-        <ScriptUploadModal
-          onClose={() => setShowUploadModal(false)}
-          onUploaded={(id) => {
-            setShowUploadModal(false);
-            setSelectedScript(id);
-          }}
+
+      {annotationTarget && annotationScriptId && (
+        <AnnotationModal
+          annotation={annotationTarget.annotations[0] ?? null}
+          lineIndex={annotationTarget.seqIdx}
+          lineLabel={annotationTarget.lineLabel}
+          onSave={(type, content) => handleAnnotationSave(type, content)}
+          onDelete={annotationTarget.annotations[0] ? handleAnnotationDelete : undefined}
+          onClose={() => setAnnotationTarget(null)}
+          isPending={createAnnotation.isPending || updateAnnotation.isPending || deleteAnnotation.isPending}
         />
       )}
     </main>

@@ -26,6 +26,7 @@ type PlayListItem struct {
 
 type SessionInfoResponse struct {
 	JoinCode      string                  `json:"join_code"`
+	ScriptID      string                  `json:"script_id"`
 	Script        *script.Script          `json:"script"`
 	Cursor        int                     `json:"cursor"`
 	Paused        bool                    `json:"paused"`

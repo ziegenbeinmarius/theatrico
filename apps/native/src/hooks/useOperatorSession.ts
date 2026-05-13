@@ -11,6 +11,7 @@ import type {
   Position,
   Session,
   SessionMessage,
+  WsCueInfo,
 } from '@/domain';
 import { flattenLines, findLineIndex } from '@/lib/scriptUtils';
 import { matchTranscriptToScript, buildContextHint } from '@/lib/scriptMatcher';
@@ -31,6 +32,8 @@ export interface UseOperatorSessionResult {
   isRecording: boolean;
   transcriptItems: TranscriptItem[];
   currentPosition: Position | null;
+  activeCues: WsCueInfo[];
+  dismissCue: (id: number) => void;
   wsStatus: WsStatus;
   error: Error | null;
   startRecording: () => Promise<void>;
@@ -60,6 +63,7 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
   const [isRecording, setIsRecording] = useState(false);
   const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
   const [currentPosition, setCurrentPosition] = useState<Position | null>(null);
+  const [activeCues, setActiveCues] = useState<WsCueInfo[]>([]);
   const [wsStatus, setWsStatus] = useState<WsStatus>('connecting');
 
   // Only sync initial position from session on first load (lineId string guards against refetch resets)
@@ -106,6 +110,7 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
         } else if (msg.position) {
           setCurrentPosition(msg.position);
         }
+        setActiveCues(msg.cues ?? []);
       } else if (msg.type === 'transcript') {
         const id = String(++transcriptCounterRef.current);
         setTranscriptItems((prev) => {
@@ -231,6 +236,10 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
     operatorWsRef.current?.forcePosition(idx + 1);
   }, [currentPosition]);
 
+  const dismissCue = useCallback((id: number) => {
+    setActiveCues((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   return {
     session,
     play,
@@ -238,6 +247,8 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
     isRecording,
     transcriptItems,
     currentPosition,
+    activeCues,
+    dismissCue,
     wsStatus,
     error,
     startRecording,
