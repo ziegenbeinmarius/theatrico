@@ -3,6 +3,8 @@ import {
   Clapperboard, ExternalLink, Mic, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
   Pause, Play, Users, Upload, Trash2,
 } from 'lucide-react';
+import type { Annotation } from '@theatrico/shared';
+import { AnnotationModal } from '../components/AnnotationModal';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { ScriptRenderer } from '../components/ScriptRenderer';
 import { ScriptUploadModal } from '../components/ScriptUploadModal';
@@ -10,6 +12,13 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { useWebSocket } from '../hooks/useWebSocket';
+import {
+  useAnnotationsQuery,
+  useCreateAnnotationMutation,
+  useUpdateAnnotationMutation,
+  useDeleteAnnotationMutation,
+  buildAnnotationMap,
+} from '../hooks/useAnnotations';
 import {
   useCreateSessionMutation,
   useDeleteScriptMutation,
@@ -19,6 +28,7 @@ import {
 } from "../hooks/useSessions";
 import {
   CreateSessionResponse,
+  CueInfo,
   PlayInfo,
   PositionUpdate,
   StatusMsg,
@@ -127,6 +137,24 @@ export function OperatorPage() {
 
   const displayScript = session?.script ?? scriptQuery.data?.script ?? null;
 
+  const annotationScriptId = selectedScript || undefined;
+  const annotationsQuery = useAnnotationsQuery(annotationScriptId);
+  const annotationMap = buildAnnotationMap(annotationsQuery.data);
+  const createAnnotation = useCreateAnnotationMutation(annotationScriptId ?? '');
+  const updateAnnotation = useUpdateAnnotationMutation(annotationScriptId ?? '');
+  const deleteAnnotation = useDeleteAnnotationMutation(annotationScriptId ?? '');
+
+  // Annotation modal state
+  interface AnnotationTarget {
+    seqIdx: number;
+    lineLabel: string;
+    annotations: Annotation[];
+  }
+  const [annotationTarget, setAnnotationTarget] = useState<AnnotationTarget | null>(null);
+
+  // Cue overlay — shown when the live cursor hits a line with cue annotations
+  const [activeCues, setActiveCues] = useState<CueInfo[]>([]);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioWsRef = useRef<WebSocket | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -147,7 +175,10 @@ export function OperatorPage() {
   const { lastPosition } = useWebSocket(session?.join_code, 'ws');
 
   useEffect(() => {
-    if (lastPosition) setPosition(lastPosition);
+    if (lastPosition) {
+      setPosition(lastPosition);
+      setActiveCues(lastPosition.cues ?? []);
+    }
   }, [lastPosition]);
 
   const operatorWsRef = useRef<WebSocket | null>(null);
@@ -164,7 +195,11 @@ export function OperatorPage() {
           setClients(s.clients);
           setPaused(s.paused);
         }
-        if (msg.type === 'position_update') setPosition(msg as PositionUpdate);
+        if (msg.type === 'position_update') {
+          const pos = msg as PositionUpdate;
+          setPosition(pos);
+          setActiveCues(pos.cues ?? []);
+        }
       } catch { /* ignore */ }
     };
     return () => ws.close();
@@ -449,6 +484,47 @@ export function OperatorPage() {
 
   function handleLineClick(seqIdx: number) {
     sendControl({ type: 'force_position', line: seqIdx });
+  }
+
+  function handleAnnotationClick(seqIdx: number, annotations: Annotation[]) {
+    if (!displayScript || !annotationScriptId) return;
+    // Build a label: "CHARACTER · first 50 chars of line text"
+    let lineLabel = `Line ${seqIdx + 1}`;
+    let idx = 0;
+    outer: for (const act of displayScript.acts) {
+      for (const scene of act.scenes) {
+        for (const line of scene.lines) {
+          if (idx === seqIdx) {
+            const charPart = line.character ? `${line.character} · ` : '';
+            lineLabel = `${charPart}${line.text.slice(0, 60)}${line.text.length > 60 ? '…' : ''}`;
+            break outer;
+          }
+          idx++;
+        }
+      }
+    }
+    setAnnotationTarget({ seqIdx, lineLabel, annotations });
+  }
+
+  function handleAnnotationSave(type: string, content: string) {
+    if (!annotationTarget || !annotationScriptId) return;
+    const existing = annotationTarget.annotations[0] ?? null;
+    if (existing) {
+      updateAnnotation.mutate(
+        { id: existing.id, type, content },
+        { onSuccess: () => setAnnotationTarget(null) },
+      );
+    } else {
+      createAnnotation.mutate(
+        { lineIndex: annotationTarget.seqIdx, type, content },
+        { onSuccess: () => setAnnotationTarget(null) },
+      );
+    }
+  }
+
+  function handleAnnotationDelete(id: number) {
+    if (!annotationScriptId) return;
+    deleteAnnotation.mutate(id, { onSuccess: () => setAnnotationTarget(null) });
   }
 
   function togglePause() {
@@ -826,12 +902,46 @@ export function OperatorPage() {
                   </div>
                 )}
 
+                {/* Cue banner — visible during a live session when cursor lands on a cued line */}
+                {session && activeCues.length > 0 && (
+                  <div className="mx-4 mb-3 shrink-0 space-y-1.5">
+                    {activeCues.map((cue) => {
+                      let label = cue.content;
+                      let icon = '⚡';
+                      try {
+                        const parsed = JSON.parse(cue.content) as { cue_type: string; description: string };
+                        const icons: Record<string, string> = { lighting: '💡', sound: '🔊', stage_direction: '🎭', custom: '⚡' };
+                        icon = icons[parsed.cue_type] ?? '⚡';
+                        label = parsed.description;
+                      } catch { /* raw string */ }
+                      return (
+                        <div
+                          key={cue.id}
+                          className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+                        >
+                          <span className="shrink-0 text-base leading-5">{icon}</span>
+                          <span>{label}</span>
+                          <button
+                            className="ml-auto shrink-0 text-amber-400/60 hover:text-amber-300 transition-colors"
+                            onClick={() => setActiveCues((prev) => prev.filter((c) => c.id !== cue.id))}
+                            title="Dismiss"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <CardContent className="flex-1 min-h-0 p-0 overflow-y-auto">
                   <ScriptRenderer
                     script={displayScript}
                     highlightedLine={position}
                     fontSize="sm"
                     onLineClick={session ? handleLineClick : undefined}
+                    annotationMap={annotationScriptId ? annotationMap : undefined}
+                    onAnnotationClick={annotationScriptId ? handleAnnotationClick : undefined}
                   />
                 </CardContent>
               </Card>
@@ -846,6 +956,17 @@ export function OperatorPage() {
             setShowUploadModal(false);
             setSelectedScript(id);
           }}
+        />
+      )}
+      {annotationTarget && annotationScriptId && (
+        <AnnotationModal
+          annotation={annotationTarget.annotations[0] ?? null}
+          lineIndex={annotationTarget.seqIdx}
+          lineLabel={annotationTarget.lineLabel}
+          onSave={(type, content) => handleAnnotationSave(type, content)}
+          onDelete={annotationTarget.annotations[0] ? handleAnnotationDelete : undefined}
+          onClose={() => setAnnotationTarget(null)}
+          isPending={createAnnotation.isPending || updateAnnotation.isPending || deleteAnnotation.isPending}
         />
       )}
     </main>

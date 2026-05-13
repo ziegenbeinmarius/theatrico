@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useCallback } from 'react';
+import type { Annotation } from '@theatrico/shared';
 import { PositionUpdate, Script, ScriptLine } from '../types';
 import { cn } from '../lib/utils';
 
@@ -10,6 +11,10 @@ interface ScriptRendererProps {
   fontSize?: FontSize;
   /** When provided, lines are clickable and this callback fires with the 0-based SeqIdx */
   onLineClick?: (seqIdx: number) => void;
+  /** Map from seqIdx → annotations for that line */
+  annotationMap?: Map<number, Annotation[]>;
+  /** Called when the annotation badge on a line is clicked */
+  onAnnotationClick?: (seqIdx: number, annotations: Annotation[]) => void;
 }
 
 const palette = ['#f8d67a', '#77c7bd', '#e88a9a', '#9fb4ff', '#caa6f7', '#a4d58e', '#f0a56b'];
@@ -30,15 +35,62 @@ interface LineRowProps {
   onLineClick?: (seqIdx: number) => void;
   seqIdx: number;
   activeLineRef: React.MutableRefObject<HTMLDivElement | null>;
+  annotations?: Annotation[];
+  onAnnotationClick?: (seqIdx: number, annotations: Annotation[]) => void;
 }
 
-const LineRow = memo(function LineRow({ line, active, upcoming, color, fontSize, clickable, onLineClick, seqIdx, activeLineRef }: LineRowProps) {
+function AnnotationBadge({
+  annotations,
+  seqIdx,
+  onClick,
+}: {
+  annotations: Annotation[];
+  seqIdx: number;
+  onClick: (seqIdx: number, annotations: Annotation[]) => void;
+}) {
+  const hasCue = annotations.some((a) => a.type === 'cue');
+  const hasNote = annotations.some((a) => a.type === 'note');
+  return (
+    <button
+      type="button"
+      title={`${annotations.length} annotation${annotations.length !== 1 ? 's' : ''}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(seqIdx, annotations);
+      }}
+      className={cn(
+        'ml-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-bold leading-none transition-opacity hover:opacity-80',
+        hasCue
+          ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/40'
+          : 'bg-primary/15 text-primary ring-1 ring-primary/30',
+      )}
+    >
+      {hasCue && <span>⚡</span>}
+      {hasNote && !hasCue && <span>📝</span>}
+      <span>{annotations.length}</span>
+    </button>
+  );
+}
+
+const LineRow = memo(function LineRow({
+  line,
+  active,
+  upcoming,
+  color,
+  fontSize,
+  clickable,
+  onLineClick,
+  seqIdx,
+  activeLineRef,
+  annotations,
+  onAnnotationClick,
+}: LineRowProps) {
   return (
     <div
       ref={active ? (el) => { activeLineRef.current = el; } : undefined}
       onClick={onLineClick ? () => onLineClick(seqIdx) : undefined}
       className={cn(
-        'grid grid-cols-[6.75rem_1fr] gap-3 rounded-md px-3 py-2 duration-300 transition-colors sm:grid-cols-[8rem_1fr]',
+        'group grid grid-cols-[6.75rem_1fr] gap-3 rounded-md px-3 py-2 duration-300 transition-colors sm:grid-cols-[8rem_1fr]',
         active && 'bg-secondary/10 ring-1 ring-secondary',
         upcoming && !active && 'bg-primary/5 ring-1 ring-primary/30 opacity-70',
         clickable && 'cursor-pointer hover:bg-muted/20',
@@ -50,12 +102,41 @@ const LineRow = memo(function LineRow({ line, active, upcoming, color, fontSize,
       >
         {line.character}
       </span>
-      <p className={cn('font-serif text-foreground', fontSizeClasses[fontSize])}>{line.text}</p>
+      <div className="flex flex-wrap items-start gap-1">
+        <p className={cn('font-serif text-foreground', fontSizeClasses[fontSize])}>{line.text}</p>
+        {annotations && annotations.length > 0 && onAnnotationClick && (
+          <AnnotationBadge
+            annotations={annotations}
+            seqIdx={seqIdx}
+            onClick={onAnnotationClick}
+          />
+        )}
+        {(!annotations || annotations.length === 0) && onAnnotationClick && (
+          <button
+            type="button"
+            title="Add annotation"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAnnotationClick(seqIdx, []);
+            }}
+            className="ml-1 hidden rounded px-1 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+          >
+            +
+          </button>
+        )}
+      </div>
     </div>
   );
 });
 
-export function ScriptRenderer({ script, highlightedLine, fontSize = 'md', onLineClick }: ScriptRendererProps) {
+export function ScriptRenderer({
+  script,
+  highlightedLine,
+  fontSize = 'md',
+  onLineClick,
+  annotationMap,
+  onAnnotationClick,
+}: ScriptRendererProps) {
   const activeLineRef = useRef<HTMLDivElement | null>(null);
 
   const characterColors = useMemo(() => {
@@ -133,20 +214,25 @@ export function ScriptRenderer({ script, highlightedLine, fontSize = 'md', onLin
             <section key={`${act.title}-${scene.title}`} className="mt-7">
               <h3 className="mb-4 font-serif text-lg italic text-muted-foreground">{scene.title}</h3>
               <div className="space-y-1">
-                {scene.lines.map(line => (
-                  <LineRow
-                    key={line.id}
-                    line={line}
-                    active={isActiveLine(actIdx, sceneIdx, line)}
-                    upcoming={isUpcomingLine(actIdx, sceneIdx, line)}
-                    color={characterColors.get(line.character) ?? palette[0]}
-                    fontSize={fontSize}
-                    clickable={!!onLineClick}
-                    onLineClick={onLineClick}
-                    seqIdx={seqMap.get(line.id) ?? 0}
-                    activeLineRef={activeLineRef}
-                  />
-                ))}
+                {scene.lines.map(line => {
+                  const seq = seqMap.get(line.id) ?? 0;
+                  return (
+                    <LineRow
+                      key={line.id}
+                      line={line}
+                      active={isActiveLine(actIdx, sceneIdx, line)}
+                      upcoming={isUpcomingLine(actIdx, sceneIdx, line)}
+                      color={characterColors.get(line.character) ?? palette[0]}
+                      fontSize={fontSize}
+                      clickable={!!onLineClick}
+                      onLineClick={onLineClick}
+                      seqIdx={seq}
+                      activeLineRef={activeLineRef}
+                      annotations={annotationMap?.get(seq)}
+                      onAnnotationClick={onAnnotationClick}
+                    />
+                  );
+                })}
               </div>
             </section>
           ))}

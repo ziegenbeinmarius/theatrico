@@ -2,6 +2,7 @@ import { config } from '@/lib/config';
 import {
   parseRawScript,
   cursorToPosition,
+  type Annotation,
   type ITheatricoClient,
   type Play,
   type Position,
@@ -91,6 +92,32 @@ class TheatricoClient implements ITheatricoClient {
     const res = await fetch(`${config.backendUrl}/api/scripts/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
+    if (!res.ok) {
+      const msg = (await res.text()).trim();
+      throw new Error(msg || `Delete failed: ${res.status}`);
+    }
+  }
+
+  getAnnotations(scriptId: string): Promise<Annotation[]> {
+    return this.request<Annotation[]>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`);
+  }
+
+  createAnnotation(scriptId: string, lineIndex: number, type: string, content: string): Promise<Annotation> {
+    return this.request<Annotation>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`, {
+      method: 'POST',
+      body: JSON.stringify({ line_index: lineIndex, type, content }),
+    });
+  }
+
+  updateAnnotation(id: number, type: string, content: string): Promise<Annotation> {
+    return this.request<Annotation>(`/api/annotations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ type, content }),
+    });
+  }
+
+  async deleteAnnotation(id: number): Promise<void> {
+    const res = await fetch(`${config.backendUrl}/api/annotations/${id}`, { method: 'DELETE' });
     if (!res.ok) {
       const msg = (await res.text()).trim();
       throw new Error(msg || `Delete failed: ${res.status}`);

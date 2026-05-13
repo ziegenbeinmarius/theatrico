@@ -1,3 +1,4 @@
+import type { Annotation } from '@theatrico/shared';
 import { CreateSessionResponse, PlayDetail, PlayInfo, SessionInfo } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -46,6 +47,34 @@ export function uploadScript(file: File, title: string) {
 
 export async function deleteScript(id: string) {
   const response = await fetch(`/api/scripts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const message = (await response.text()).trim();
+    throw new Error(message || `Delete failed with ${response.status}`);
+  }
+}
+
+export function getAnnotations(scriptId: string) {
+  return request<Annotation[]>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`);
+}
+
+export function createAnnotation(scriptId: string, lineIndex: number, type: string, content: string) {
+  return request<Annotation>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ line_index: lineIndex, type, content }),
+  });
+}
+
+export function updateAnnotation(id: number, type: string, content: string) {
+  return request<Annotation>(`/api/annotations/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, content }),
+  });
+}
+
+export async function deleteAnnotation(id: number) {
+  const response = await fetch(`/api/annotations/${id}`, { method: 'DELETE' });
   if (!response.ok) {
     const message = (await response.text()).trim();
     throw new Error(message || `Delete failed with ${response.status}`);
