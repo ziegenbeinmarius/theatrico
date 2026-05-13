@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Clapperboard, ExternalLink, Mic, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
-  Pause, Play, Users, Upload, Trash2,
+  BookOpen, Clapperboard, ExternalLink, Mic, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
+  Pause, Play, Users,
 } from 'lucide-react';
 import type { Annotation } from '@theatrico/shared';
 import { AnnotationModal } from '../components/AnnotationModal';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { ScriptRenderer } from '../components/ScriptRenderer';
-import { ScriptUploadModal } from '../components/ScriptUploadModal';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -21,7 +21,6 @@ import {
 } from '../hooks/useAnnotations';
 import {
   useCreateSessionMutation,
-  useDeleteScriptMutation,
   useScriptsQuery,
   useScriptQuery,
   useSessionQuery,
@@ -115,9 +114,7 @@ type WebAudioWindow = Window & typeof globalThis & {
 export function OperatorPage() {
   const scriptsQuery = useScriptsQuery();
   const createSession = useCreateSessionMutation();
-  const deleteScript = useDeleteScriptMutation();
   const [joinCode, setJoinCode] = useState<string | null>(null);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const sessionQuery = useSessionQuery(joinCode ?? undefined);
   const session = sessionQuery.data ?? null;
 
@@ -626,13 +623,13 @@ export function OperatorPage() {
                         <label className="text-sm text-muted-foreground">
                           Play <span className="text-destructive">*</span>
                         </label>
-                        <button
-                          onClick={() => setShowUploadModal(true)}
+                        <Link
+                          to="/scripts"
                           className="flex items-center gap-1 text-xs transition-colors text-muted-foreground hover:text-foreground"
                         >
-                          <Upload className="w-3 h-3" />
-                          Upload Script
-                        </button>
+                          <BookOpen className="w-3 h-3" />
+                          Manage scripts
+                        </Link>
                       </div>
                       <select
                         value={selectedScript}
@@ -698,61 +695,6 @@ export function OperatorPage() {
                 )}
               </CardContent>
             </Card>
-
-            {/* Script management */}
-            {!session &&
-              scriptsQuery.data &&
-              scriptsQuery.data.filter((p: PlayInfo) => p.id !== "default")
-                .length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center gap-2">
-                      <ScrollText
-                        className="w-5 h-5 text-secondary"
-                        aria-hidden="true"
-                      />
-                      <CardTitle>Scripts</CardTitle>
-                    </div>
-                    <CardDescription>Manage uploaded scripts.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {scriptsQuery.data
-                      .filter((p: PlayInfo) => p.id !== "default")
-                      .map((p: PlayInfo) => (
-                        <div
-                          key={p.id}
-                          className="flex items-center justify-between px-3 py-2 rounded-md bg-black/20"
-                        >
-                          <span className="text-sm truncate">{p.title}</span>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Delete "${p.title}"?`)) {
-                                deleteScript.mutate(p.id, {
-                                  onSuccess: () => {
-                                    if (selectedScript === p.id)
-                                      setSelectedScript("");
-                                  },
-                                });
-                              }
-                            }}
-                            disabled={deleteScript.isPending}
-                            className="ml-2 transition-colors shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
-                            title="Delete script"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    {deleteScript.isError && (
-                      <p className="text-xs text-destructive">
-                        {deleteScript.error instanceof Error
-                          ? deleteScript.error.message
-                          : "Delete failed."}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
 
             {/* Microphone / streaming */}
             {session && (
@@ -949,15 +891,6 @@ export function OperatorPage() {
           </div>
         </div>
       </div>
-      {showUploadModal && (
-        <ScriptUploadModal
-          onClose={() => setShowUploadModal(false)}
-          onUploaded={(id) => {
-            setShowUploadModal(false);
-            setSelectedScript(id);
-          }}
-        />
-      )}
       {annotationTarget && annotationScriptId && (
         <AnnotationModal
           annotation={annotationTarget.annotations[0] ?? null}

@@ -98,6 +98,10 @@ class TheatricoClient implements ITheatricoClient {
     }
   }
 
+  getScript(id: string): Promise<RawPlayDetail> {
+    return this.request<RawPlayDetail>(`/api/scripts/${encodeURIComponent(id)}`);
+  }
+
   getAnnotations(scriptId: string): Promise<Annotation[]> {
     return this.request<Annotation[]>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`);
   }
