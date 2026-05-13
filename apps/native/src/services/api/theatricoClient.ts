@@ -7,6 +7,7 @@ import {
   type Position,
   type RawCreateSession,
   type RawGetSession,
+  type RawPlayDetail,
   type Session,
   type SessionStatus,
 } from '@theatrico/shared';
@@ -68,6 +69,32 @@ class TheatricoClient implements ITheatricoClient {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     });
+  }
+
+  async uploadScript(uri: string, fileName: string, title: string): Promise<RawPlayDetail> {
+    const form = new FormData();
+    // React Native FormData accepts { uri, name, type } as a blob-like object
+    form.append('script', { uri, name: fileName, type: 'text/markdown' } as unknown as Blob);
+    form.append('title', title);
+    const res = await fetch(`${config.backendUrl}/api/scripts`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const msg = (await res.text()).trim();
+      throw new Error(msg || `Upload failed: ${res.status}`);
+    }
+    return res.json() as Promise<RawPlayDetail>;
+  }
+
+  async deleteScript(id: string): Promise<void> {
+    const res = await fetch(`${config.backendUrl}/api/scripts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const msg = (await res.text()).trim();
+      throw new Error(msg || `Delete failed: ${res.status}`);
+    }
   }
 }
 

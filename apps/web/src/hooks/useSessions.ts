@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { createSession, getPlay, getPlays, getSession } from '../lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createSession, deleteScript, getPlay, getPlays, getSession, uploadScript } from '../lib/api';
 
 export const sessionKeys = {
   all: ['sessions'] as const,
@@ -41,5 +41,21 @@ export function usePlayQuery(id: string | undefined) {
 export function useCreateSessionMutation() {
   return useMutation({
     mutationFn: createSession,
+  });
+}
+
+export function useUploadScriptMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, title }: { file: File; title: string }) => uploadScript(file, title),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: playKeys.all }),
+  });
+}
+
+export function useDeleteScriptMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteScript(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: playKeys.all }),
   });
 }

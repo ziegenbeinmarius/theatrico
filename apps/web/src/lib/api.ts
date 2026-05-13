@@ -36,3 +36,18 @@ export function createSession(params: { language?: string; scriptId?: string }) 
     body: JSON.stringify({ language: params.language ?? '', script_id: params.scriptId ?? '' }),
   });
 }
+
+export function uploadScript(file: File, title: string) {
+  const form = new FormData();
+  form.append('script', file);
+  form.append('title', title);
+  return request<PlayDetail>('/api/scripts', { method: 'POST', body: form });
+}
+
+export async function deleteScript(id: string) {
+  const response = await fetch(`/api/scripts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const message = (await response.text()).trim();
+    throw new Error(message || `Delete failed with ${response.status}`);
+  }
+}
