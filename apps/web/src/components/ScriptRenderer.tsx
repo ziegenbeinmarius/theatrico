@@ -15,6 +15,8 @@ interface ScriptRendererProps {
   annotationMap?: Map<number, Annotation[]>;
   /** Called when the annotation badge on a line is clicked */
   onAnnotationClick?: (seqIdx: number, annotations: Annotation[]) => void;
+  /** When true, annotation content is expanded inline below each line instead of a badge */
+  showAnnotationsInline?: boolean;
 }
 
 const palette = ['#f8d67a', '#77c7bd', '#e88a9a', '#9fb4ff', '#caa6f7', '#a4d58e', '#f0a56b'];
@@ -37,6 +39,7 @@ interface LineRowProps {
   activeLineRef: React.MutableRefObject<HTMLDivElement | null>;
   annotations?: Annotation[];
   onAnnotationClick?: (seqIdx: number, annotations: Annotation[]) => void;
+  showAnnotationsInline?: boolean;
 }
 
 function AnnotationBadge({
@@ -72,6 +75,51 @@ function AnnotationBadge({
   );
 }
 
+function InlineAnnotations({
+  annotations,
+  seqIdx,
+  onAnnotationClick,
+}: {
+  annotations: Annotation[];
+  seqIdx: number;
+  onAnnotationClick?: (seqIdx: number, annotations: Annotation[]) => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-col gap-0.5">
+      {annotations.map((a) => {
+        let icon = '⚡';
+        let content = a.content;
+        if (a.type === 'cue') {
+          try {
+            const parsed = JSON.parse(a.content) as { cue_type: string; description: string };
+            const icons: Record<string, string> = { lighting: '💡', sound: '🔊', stage_direction: '🎭', custom: '⚡' };
+            icon = icons[parsed.cue_type] ?? '⚡';
+            content = parsed.description;
+          } catch { /* raw string */ }
+        } else {
+          icon = '📝';
+        }
+        return (
+          <button
+            key={a.id}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onAnnotationClick?.(seqIdx, annotations); }}
+            className={cn(
+              'flex items-start gap-1.5 rounded px-1.5 py-0.5 text-left text-xs leading-4 transition-opacity hover:opacity-80',
+              a.type === 'cue'
+                ? 'bg-amber-500/15 text-amber-400'
+                : 'bg-primary/10 text-primary/80',
+            )}
+          >
+            <span className="shrink-0">{icon}</span>
+            <span>{content}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const LineRow = memo(function LineRow({
   line,
   active,
@@ -84,6 +132,7 @@ const LineRow = memo(function LineRow({
   activeLineRef,
   annotations,
   onAnnotationClick,
+  showAnnotationsInline,
 }: LineRowProps) {
   return (
     <div
@@ -102,27 +151,36 @@ const LineRow = memo(function LineRow({
       >
         {line.character}
       </span>
-      <div className="flex flex-wrap items-start gap-1">
-        <p className={cn('font-serif text-foreground', fontSizeClasses[fontSize])}>{line.text}</p>
-        {annotations && annotations.length > 0 && onAnnotationClick && (
-          <AnnotationBadge
+      <div>
+        <div className="flex flex-wrap items-start gap-1">
+          <p className={cn('font-serif text-foreground', fontSizeClasses[fontSize])}>{line.text}</p>
+          {annotations && annotations.length > 0 && onAnnotationClick && !showAnnotationsInline && (
+            <AnnotationBadge
+              annotations={annotations}
+              seqIdx={seqIdx}
+              onClick={onAnnotationClick}
+            />
+          )}
+          {(!annotations || annotations.length === 0) && onAnnotationClick && (
+            <button
+              type="button"
+              title="Add annotation"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAnnotationClick(seqIdx, []);
+              }}
+              className="ml-1 hidden rounded px-1 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+            >
+              +
+            </button>
+          )}
+        </div>
+        {showAnnotationsInline && annotations && annotations.length > 0 && (
+          <InlineAnnotations
             annotations={annotations}
             seqIdx={seqIdx}
-            onClick={onAnnotationClick}
+            onAnnotationClick={onAnnotationClick}
           />
-        )}
-        {(!annotations || annotations.length === 0) && onAnnotationClick && (
-          <button
-            type="button"
-            title="Add annotation"
-            onClick={(e) => {
-              e.stopPropagation();
-              onAnnotationClick(seqIdx, []);
-            }}
-            className="ml-1 hidden rounded px-1 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-          >
-            +
-          </button>
         )}
       </div>
     </div>
@@ -136,6 +194,7 @@ export function ScriptRenderer({
   onLineClick,
   annotationMap,
   onAnnotationClick,
+  showAnnotationsInline,
 }: ScriptRendererProps) {
   const activeLineRef = useRef<HTMLDivElement | null>(null);
 
@@ -230,6 +289,7 @@ export function ScriptRenderer({
                       activeLineRef={activeLineRef}
                       annotations={annotationMap?.get(seq)}
                       onAnnotationClick={onAnnotationClick}
+                      showAnnotationsInline={showAnnotationsInline}
                     />
                   );
                 })}
