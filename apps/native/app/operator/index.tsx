@@ -126,7 +126,7 @@ export default function OperatorScreen() {
   } = useOperatorSession(sessionCode);
 
   const isPaused = session?.status === 'paused';
-  const scriptId = session?.playId ?? '';
+  const scriptId = session?.scriptId ?? '';
 
   // Annotations
   const annotationsQuery = useAnnotationsQuery(scriptId || undefined);

@@ -339,6 +339,7 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 	}
 	resp := api.SessionInfoResponse{
 		JoinCode:      sess.JoinCode,
+		ScriptID:      sess.ScriptID,
 		Script:        sess.Script,
 		Cursor:        sess.Cursor(),
 		Paused:        sess.Paused(),

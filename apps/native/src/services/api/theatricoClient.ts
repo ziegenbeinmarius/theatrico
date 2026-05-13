@@ -40,6 +40,7 @@ class TheatricoClient implements ITheatricoClient {
       id: raw.join_code,
       code: raw.join_code,
       playId,
+      scriptId: playId,
       status: 'active',
       currentPosition: null,
     };
@@ -52,6 +53,7 @@ class TheatricoClient implements ITheatricoClient {
       id: raw.join_code,
       code: raw.join_code,
       playId: play.id,
+      scriptId: raw.script_id,
       status: raw.paused ? 'paused' : 'active',
       currentPosition: cursorToPosition(play, raw.cursor),
       play,

@@ -64,6 +64,7 @@ export interface Session {
   id: string;
   code: string;
   playId: string;
+  scriptId: string;
   status: SessionStatus;
   currentPosition: Position | null;
   play?: Play;
@@ -101,6 +102,7 @@ export interface RawCreateSession {
 
 export interface RawGetSession {
   join_code: string;
+  script_id: string;
   script: RawScript;
   cursor: number;
   paused: boolean;
