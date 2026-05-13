@@ -9,6 +9,6 @@ export const playKeys = {
 export function usePlays() {
   return useQuery<Play[], Error>({
     queryKey: playKeys.all,
-    queryFn: () => theatricoClient.listPlays(),
+    queryFn: () => theatricoClient.listScripts(),
   });
 }

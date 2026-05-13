@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 // SQLiteStore implements Store using a SQLite database.
@@ -13,29 +11,10 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-// NewSQLiteStore opens (or creates) a SQLite database at path and ensures the
-// annotations table exists.
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS annotations (
-			id         INTEGER  PRIMARY KEY AUTOINCREMENT,
-			script_id  TEXT     NOT NULL,
-			line_index INTEGER  NOT NULL,
-			type       TEXT     NOT NULL,
-			content    TEXT     NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL
-		);
-		CREATE INDEX IF NOT EXISTS idx_ann_script   ON annotations(script_id);
-		CREATE INDEX IF NOT EXISTS idx_ann_line      ON annotations(script_id, line_index);
-	`); err != nil {
-		return nil, fmt.Errorf("create annotations table: %w", err)
-	}
-	return &SQLiteStore{db: db}, nil
+// NewSQLiteStore returns a Store backed by an already-open *sql.DB.
+// Schema is managed centrally by internal/db.
+func NewSQLiteStore(db *sql.DB) *SQLiteStore {
+	return &SQLiteStore{db: db}
 }
 
 func (s *SQLiteStore) ListByScript(scriptID string) ([]Annotation, error) {

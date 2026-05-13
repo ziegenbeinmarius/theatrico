@@ -170,7 +170,7 @@ export type SessionMessage = PositionUpdateMessage | TranscriptMessage | ErrorMe
 // ─── Service interfaces ───────────────────────────────────────────────────────
 
 export interface ITheatricoClient {
-  listPlays(): Promise<Play[]>;
+  listScripts(): Promise<Play[]>;
   createSession(playId: string): Promise<Session>;
   getSession(code: string): Promise<Session>;
   updatePosition(code: string, position: Position): Promise<void>;

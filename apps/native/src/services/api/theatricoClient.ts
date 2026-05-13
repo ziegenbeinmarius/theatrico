@@ -26,14 +26,14 @@ class TheatricoClient implements ITheatricoClient {
     return res.json() as Promise<T>;
   }
 
-  listPlays(): Promise<Play[]> {
-    return this.request<Play[]>('/api/plays');
+  listScripts(): Promise<Play[]> {
+    return this.request<Play[]>('/api/scripts');
   }
 
   async createSession(playId: string): Promise<Session> {
     const raw = await this.request<RawCreateSession>('/api/sessions', {
       method: 'POST',
-      body: JSON.stringify({ playId }),
+      body: JSON.stringify({ script_id: playId }),
     });
     return {
       id: raw.join_code,
