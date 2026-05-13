@@ -79,6 +79,13 @@ export function ScriptEditorPage() {
     [scriptQuery.data],
   );
 
+  const handleLineClick = useCallback(
+    (seqIdx: number) => {
+      handleAnnotationClick(seqIdx, annotationMap.get(seqIdx) ?? []);
+    },
+    [annotationMap, handleAnnotationClick],
+  );
+
   function handleSave(type: string, content: string) {
     if (!annotationTarget) return;
     const existing = annotationTarget.annotations[0] ?? null;
@@ -111,7 +118,7 @@ export function ScriptEditorPage() {
             to="/scripts"
             className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="w-4 h-4" />
             Scripts
           </Link>
           {script && (
@@ -126,16 +133,19 @@ export function ScriptEditorPage() {
         </div>
         <div className="flex items-center gap-2">
           {counts.cues > 0 && (
-            <Badge variant="outline" className="gap-1 text-xs text-amber-400 border-amber-500/40">
-              ⚡ {counts.cues} cue{counts.cues !== 1 ? 's' : ''}
+            <Badge
+              variant="outline"
+              className="gap-1 text-xs text-amber-400 border-amber-500/40"
+            >
+              ⚡ {counts.cues} cue{counts.cues !== 1 ? "s" : ""}
             </Badge>
           )}
           {counts.notes > 0 && (
             <Badge variant="outline" className="gap-1 text-xs">
-              📝 {counts.notes} note{counts.notes !== 1 ? 's' : ''}
+              📝 {counts.notes} note{counts.notes !== 1 ? "s" : ""}
             </Badge>
           )}
-          <span className="text-xs text-muted-foreground hidden sm:block">
+          <span className="hidden text-xs text-muted-foreground sm:block">
             Click any line to add a note or cue
           </span>
         </div>
@@ -143,13 +153,16 @@ export function ScriptEditorPage() {
 
       {/* Content */}
       {scriptQuery.isLoading ? (
-        <div className="flex items-center justify-center py-24 text-muted-foreground text-sm">
+        <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">
           Loading script…
         </div>
       ) : scriptQuery.isError || !script ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-24 text-center px-4">
+        <div className="flex flex-col items-center justify-center gap-3 px-4 py-24 text-center">
           <p className="text-sm text-destructive">Script not found.</p>
-          <Link to="/scripts" className="text-sm text-muted-foreground hover:text-foreground underline">
+          <Link
+            to="/scripts"
+            className="text-sm underline text-muted-foreground hover:text-foreground"
+          >
             Back to library
           </Link>
         </div>
@@ -157,6 +170,7 @@ export function ScriptEditorPage() {
         <ScriptRenderer
           script={script}
           fontSize="md"
+          onLineClick={handleLineClick}
           annotationMap={annotationMap}
           onAnnotationClick={handleAnnotationClick}
         />
@@ -171,7 +185,9 @@ export function ScriptEditorPage() {
           onDelete={annotationTarget.annotations[0] ? handleDelete : undefined}
           onClose={() => setAnnotationTarget(null)}
           isPending={
-            createAnnotation.isPending || updateAnnotation.isPending || deleteAnnotation.isPending
+            createAnnotation.isPending ||
+            updateAnnotation.isPending ||
+            deleteAnnotation.isPending
           }
         />
       )}
