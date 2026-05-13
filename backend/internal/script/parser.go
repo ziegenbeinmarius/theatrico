@@ -2,6 +2,7 @@ package script
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -36,8 +37,15 @@ func ParseFile(path string) (*Script, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return parseReader(f)
+}
 
-	script := &Script{Title: "Script"}
+func ParseString(content string) (*Script, error) {
+	return parseReader(strings.NewReader(content))
+}
+
+func parseReader(r io.Reader) (*Script, error) {
+	scr := &Script{Title: "Script"}
 	var currentAct *Act
 	var currentScene *Scene
 	var currentChar string
@@ -51,28 +59,26 @@ func ParseFile(path string) (*Script, error) {
 		currentScene.Lines = append(currentScene.Lines, Line{ID: lineID, Character: char, Text: text})
 	}
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		raw := scanner.Text()
 		trimmed := strings.TrimSpace(raw)
 
 		if strings.HasPrefix(trimmed, "# ") && !strings.HasPrefix(trimmed, "## ") {
-			// New act
 			currentChar = ""
 			act := Act{Title: strings.TrimPrefix(trimmed, "# ")}
-			script.Acts = append(script.Acts, act)
-			currentAct = &script.Acts[len(script.Acts)-1]
+			scr.Acts = append(scr.Acts, act)
+			currentAct = &scr.Acts[len(scr.Acts)-1]
 			currentScene = nil
 			continue
 		}
 
 		if strings.HasPrefix(trimmed, "## ") {
-			// New scene
 			currentChar = ""
 			if currentAct == nil {
 				act := Act{Title: "Act 1"}
-				script.Acts = append(script.Acts, act)
-				currentAct = &script.Acts[len(script.Acts)-1]
+				scr.Acts = append(scr.Acts, act)
+				currentAct = &scr.Acts[len(scr.Acts)-1]
 			}
 			scene := Scene{Title: strings.TrimPrefix(trimmed, "## ")}
 			currentAct.Scenes = append(currentAct.Scenes, scene)
@@ -88,17 +94,15 @@ func ParseFile(path string) (*Script, error) {
 			continue
 		}
 
-		// Continuation line
 		if currentChar != "" && trimmed != "" {
 			addLine(currentChar, trimmed)
 			continue
 		}
 
-		// Blank line resets continuation
 		if trimmed == "" {
 			currentChar = ""
 		}
 	}
 
-	return script, scanner.Err()
+	return scr, scanner.Err()
 }
