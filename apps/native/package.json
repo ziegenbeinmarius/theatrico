@@ -28,6 +28,7 @@
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
+    "expo-document-picker": "~13.0.3",
     "expo-file-system": "~19.0.22",
     "expo-linking": "~8.0.12",
     "expo-router": "~6.0.23",

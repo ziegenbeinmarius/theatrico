@@ -1,21 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Clapperboard, ExternalLink, Mic, PlusCircle, Radio, RefreshCw, ScrollText, StopCircle,
-  Pause, Play, Users,
+  Pause, Play, Users, Upload, Trash2,
 } from 'lucide-react';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { ScriptRenderer } from '../components/ScriptRenderer';
+import { ScriptUploadModal } from '../components/ScriptUploadModal';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
   useCreateSessionMutation,
+  useDeleteScriptMutation,
   usePlaysQuery,
   usePlayQuery,
   useSessionQuery,
 } from "../hooks/useSessions";
-import { PositionUpdate, StatusMsg } from "../types";
+import {
+  CreateSessionResponse,
+  PlayInfo,
+  PositionUpdate,
+  StatusMsg,
+} from "../types";
 
 interface AudioDevice {
   deviceId: string;
@@ -98,7 +105,9 @@ type WebAudioWindow = Window & typeof globalThis & {
 export function OperatorPage() {
   const playsQuery = usePlaysQuery();
   const createSession = useCreateSessionMutation();
+  const deleteScript = useDeleteScriptMutation();
   const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const sessionQuery = useSessionQuery(joinCode ?? undefined);
   const session = sessionQuery.data ?? null;
 
@@ -429,7 +438,7 @@ export function OperatorPage() {
     createSession.mutate(
       { language: selectedLanguage, scriptId: selectedScript },
       {
-        onSuccess: (data) => {
+        onSuccess: (data: CreateSessionResponse) => {
           if (data && data.join_code) {
             setJoinCode(data.join_code);
           }
@@ -462,7 +471,9 @@ export function OperatorPage() {
             <Clapperboard className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-normal">Theatrico</h1>
+            <h1 className="text-3xl font-semibold tracking-normal">
+              Theatrico
+            </h1>
             <p className="text-sm text-muted-foreground">Operator console</p>
           </div>
           {session && (
@@ -514,13 +525,18 @@ export function OperatorPage() {
                             <ScrollText className="h-3 w-3" />
                             {displayScript.title}
                           </span>
-                          <span>{displayScript.acts.length} acts · {totalScenes} scenes</span>
+                          <span>
+                            {displayScript.acts.length} acts · {totalScenes}{" "}
+                            scenes
+                          </span>
                         </div>
                         {session.language && (
                           <div className="text-xs">
                             Language:{" "}
                             <span className="text-foreground">
-                              {LANGUAGES.find((l) => l.code === session.language)?.label ?? session.language}
+                              {LANGUAGES.find(
+                                (l) => l.code === session.language,
+                              )?.label ?? session.language}
                             </span>
                           </div>
                         )}
@@ -530,19 +546,32 @@ export function OperatorPage() {
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="mb-1.5 block text-sm text-muted-foreground">
-                        Play <span className="text-destructive">*</span>
-                      </label>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label className="text-sm text-muted-foreground">
+                          Play <span className="text-destructive">*</span>
+                        </label>
+                        <button
+                          onClick={() => setShowUploadModal(true)}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Upload className="h-3 w-3" />
+                          Upload Script
+                        </button>
+                      </div>
                       <select
                         value={selectedScript}
                         onChange={(e) => setSelectedScript(e.target.value)}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        <option value="" disabled>Select a play…</option>
+                        <option value="" disabled>
+                          Select a play…
+                        </option>
                         {playsQuery.data
-                          ?.filter((p) => p.id !== "default")
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>{p.title}</option>
+                          ?.filter((p: PlayInfo) => p.id !== "default")
+                          .map((p: PlayInfo) => (
+                            <option key={p.id} value={p.id}>
+                              {p.title}
+                            </option>
                           ))}
                       </select>
                     </div>
@@ -556,11 +585,14 @@ export function OperatorPage() {
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
                         {LANGUAGES.map((l) => (
-                          <option key={l.code} value={l.code}>{l.label}</option>
+                          <option key={l.code} value={l.code}>
+                            {l.label}
+                          </option>
                         ))}
                       </select>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Sets the speech recognition language so Whisper doesn't switch unexpectedly.
+                        Sets the speech recognition language so Whisper doesn't
+                        switch unexpectedly.
                       </p>
                     </div>
                     <Button
@@ -570,7 +602,10 @@ export function OperatorPage() {
                       disabled={createSession.isPending || !selectedScript}
                     >
                       {createSession.isPending ? (
-                        <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+                        <RefreshCw
+                          className="h-5 w-5 animate-spin"
+                          aria-hidden="true"
+                        />
                       ) : (
                         <PlusCircle className="h-5 w-5" aria-hidden="true" />
                       )}
@@ -588,12 +623,61 @@ export function OperatorPage() {
               </CardContent>
             </Card>
 
+            {/* Script management */}
+            {!session && playsQuery.data && playsQuery.data.filter((p) => p.id !== 'default').length > 0 && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <ScrollText className="h-5 w-5 text-secondary" aria-hidden="true" />
+                    <CardTitle>Scripts</CardTitle>
+                  </div>
+                  <CardDescription>Manage uploaded scripts.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {playsQuery.data
+                    .filter((p) => p.id !== 'default')
+                    .map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center justify-between rounded-md bg-black/20 px-3 py-2"
+                      >
+                        <span className="text-sm truncate">{p.title}</span>
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete "${p.title}"?`)) {
+                              deleteScript.mutate(p.id, {
+                                onSuccess: () => {
+                                  if (selectedScript === p.id) setSelectedScript('');
+                                },
+                              });
+                            }
+                          }}
+                          disabled={deleteScript.isPending}
+                          className="ml-2 shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                          title="Delete script"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  {deleteScript.isError && (
+                    <p className="text-xs text-destructive">
+                      {deleteScript.error instanceof Error ? deleteScript.error.message : 'Delete failed.'}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Microphone / streaming */}
             {session && (
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
-                    <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
+                    <Mic
+                      className="h-5 w-5 text-secondary"
+                      aria-hidden="true"
+                    />
                     <CardTitle>Microphone</CardTitle>
                   </div>
                   <CardDescription>
@@ -611,7 +695,9 @@ export function OperatorPage() {
                       <option value="">Default microphone</option>
                     )}
                     {devices.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </option>
                     ))}
                   </select>
                   <div className="flex items-center gap-3">
@@ -622,7 +708,10 @@ export function OperatorPage() {
                         disabled={streamStarting}
                       >
                         {streamStarting ? (
-                          <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          <RefreshCw
+                            className="h-4 w-4 animate-spin"
+                            aria-hidden="true"
+                          />
                         ) : (
                           <Radio className="h-4 w-4" aria-hidden="true" />
                         )}
@@ -663,8 +752,13 @@ export function OperatorPage() {
                 <CardHeader className="shrink-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <ScrollText className="h-5 w-5 text-secondary" aria-hidden="true" />
-                      <CardTitle>{session ? "Click to Jump" : "Script Preview"}</CardTitle>
+                      <ScrollText
+                        className="h-5 w-5 text-secondary"
+                        aria-hidden="true"
+                      />
+                      <CardTitle>
+                        {session ? "Click to Jump" : "Script Preview"}
+                      </CardTitle>
                     </div>
                     {session && (
                       <Button
@@ -693,7 +787,8 @@ export function OperatorPage() {
                       : "Start a session to enable cursor control."}
                     {position && (
                       <span className="ml-2 text-muted-foreground">
-                        · Act {position.act + 1} · Scene {position.scene + 1} · Line {position.line}
+                        · Act {position.act + 1} · Scene {position.scene + 1} ·
+                        Line {position.line}
                       </span>
                     )}
                   </CardDescription>
@@ -712,7 +807,9 @@ export function OperatorPage() {
                         </span>
                       ) : (
                         transcripts.map((t, i) => (
-                          <p key={i} className="mb-0.5">{t}</p>
+                          <p key={i} className="mb-0.5">
+                            {t}
+                          </p>
                         ))
                       )}
                       <div ref={transcriptEndRef} />
@@ -733,6 +830,15 @@ export function OperatorPage() {
           </div>
         </div>
       </div>
+      {showUploadModal && (
+        <ScriptUploadModal
+          onClose={() => setShowUploadModal(false)}
+          onUploaded={(id) => {
+            setShowUploadModal(false);
+            setSelectedScript(id);
+          }}
+        />
+      )}
     </main>
   );
 }

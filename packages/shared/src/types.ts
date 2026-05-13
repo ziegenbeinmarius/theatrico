@@ -175,6 +175,7 @@ export interface ITheatricoClient {
   getSession(code: string): Promise<Session>;
   updatePosition(code: string, position: Position): Promise<void>;
   updateStatus(code: string, status: SessionStatus): Promise<void>;
+  deleteScript(id: string): Promise<void>;
 }
 
 export interface ISessionWebSocket {
