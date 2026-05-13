@@ -17,7 +17,12 @@ import {
   usePlayQuery,
   useSessionQuery,
 } from "../hooks/useSessions";
-import { PositionUpdate, StatusMsg } from "../types";
+import {
+  CreateSessionResponse,
+  PlayInfo,
+  PositionUpdate,
+  StatusMsg,
+} from "../types";
 
 interface AudioDevice {
   deviceId: string;
@@ -433,7 +438,7 @@ export function OperatorPage() {
     createSession.mutate(
       { language: selectedLanguage, scriptId: selectedScript },
       {
-        onSuccess: (data) => {
+        onSuccess: (data: CreateSessionResponse) => {
           if (data && data.join_code) {
             setJoinCode(data.join_code);
           }
@@ -466,7 +471,9 @@ export function OperatorPage() {
             <Clapperboard className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-normal">Theatrico</h1>
+            <h1 className="text-3xl font-semibold tracking-normal">
+              Theatrico
+            </h1>
             <p className="text-sm text-muted-foreground">Operator console</p>
           </div>
           {session && (
@@ -518,13 +525,18 @@ export function OperatorPage() {
                             <ScrollText className="h-3 w-3" />
                             {displayScript.title}
                           </span>
-                          <span>{displayScript.acts.length} acts · {totalScenes} scenes</span>
+                          <span>
+                            {displayScript.acts.length} acts · {totalScenes}{" "}
+                            scenes
+                          </span>
                         </div>
                         {session.language && (
                           <div className="text-xs">
                             Language:{" "}
                             <span className="text-foreground">
-                              {LANGUAGES.find((l) => l.code === session.language)?.label ?? session.language}
+                              {LANGUAGES.find(
+                                (l) => l.code === session.language,
+                              )?.label ?? session.language}
                             </span>
                           </div>
                         )}
@@ -551,11 +563,15 @@ export function OperatorPage() {
                         onChange={(e) => setSelectedScript(e.target.value)}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
-                        <option value="" disabled>Select a play…</option>
+                        <option value="" disabled>
+                          Select a play…
+                        </option>
                         {playsQuery.data
-                          ?.filter((p) => p.id !== "default")
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>{p.title}</option>
+                          ?.filter((p: PlayInfo) => p.id !== "default")
+                          .map((p: PlayInfo) => (
+                            <option key={p.id} value={p.id}>
+                              {p.title}
+                            </option>
                           ))}
                       </select>
                     </div>
@@ -569,11 +585,14 @@ export function OperatorPage() {
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
                         {LANGUAGES.map((l) => (
-                          <option key={l.code} value={l.code}>{l.label}</option>
+                          <option key={l.code} value={l.code}>
+                            {l.label}
+                          </option>
                         ))}
                       </select>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Sets the speech recognition language so Whisper doesn't switch unexpectedly.
+                        Sets the speech recognition language so Whisper doesn't
+                        switch unexpectedly.
                       </p>
                     </div>
                     <Button
@@ -583,7 +602,10 @@ export function OperatorPage() {
                       disabled={createSession.isPending || !selectedScript}
                     >
                       {createSession.isPending ? (
-                        <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+                        <RefreshCw
+                          className="h-5 w-5 animate-spin"
+                          aria-hidden="true"
+                        />
                       ) : (
                         <PlusCircle className="h-5 w-5" aria-hidden="true" />
                       )}
@@ -652,7 +674,10 @@ export function OperatorPage() {
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
-                    <Mic className="h-5 w-5 text-secondary" aria-hidden="true" />
+                    <Mic
+                      className="h-5 w-5 text-secondary"
+                      aria-hidden="true"
+                    />
                     <CardTitle>Microphone</CardTitle>
                   </div>
                   <CardDescription>
@@ -670,7 +695,9 @@ export function OperatorPage() {
                       <option value="">Default microphone</option>
                     )}
                     {devices.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label}
+                      </option>
                     ))}
                   </select>
                   <div className="flex items-center gap-3">
@@ -681,7 +708,10 @@ export function OperatorPage() {
                         disabled={streamStarting}
                       >
                         {streamStarting ? (
-                          <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          <RefreshCw
+                            className="h-4 w-4 animate-spin"
+                            aria-hidden="true"
+                          />
                         ) : (
                           <Radio className="h-4 w-4" aria-hidden="true" />
                         )}
@@ -722,8 +752,13 @@ export function OperatorPage() {
                 <CardHeader className="shrink-0">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <ScrollText className="h-5 w-5 text-secondary" aria-hidden="true" />
-                      <CardTitle>{session ? "Click to Jump" : "Script Preview"}</CardTitle>
+                      <ScrollText
+                        className="h-5 w-5 text-secondary"
+                        aria-hidden="true"
+                      />
+                      <CardTitle>
+                        {session ? "Click to Jump" : "Script Preview"}
+                      </CardTitle>
                     </div>
                     {session && (
                       <Button
@@ -752,7 +787,8 @@ export function OperatorPage() {
                       : "Start a session to enable cursor control."}
                     {position && (
                       <span className="ml-2 text-muted-foreground">
-                        · Act {position.act + 1} · Scene {position.scene + 1} · Line {position.line}
+                        · Act {position.act + 1} · Scene {position.scene + 1} ·
+                        Line {position.line}
                       </span>
                     )}
                   </CardDescription>
@@ -771,7 +807,9 @@ export function OperatorPage() {
                         </span>
                       ) : (
                         transcripts.map((t, i) => (
-                          <p key={i} className="mb-0.5">{t}</p>
+                          <p key={i} className="mb-0.5">
+                            {t}
+                          </p>
                         ))
                       )}
                       <div ref={transcriptEndRef} />
