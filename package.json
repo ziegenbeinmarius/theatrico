@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "pnpm --filter @theatrico/web dev",
     "build": "pnpm --filter @theatrico/web build",
-    "preview": "pnpm --filter @theatrico/web preview"
+    "preview": "pnpm --filter @theatrico/web preview",
+    "native": "pnpm --filter @theatrico/native start",
+    "native:ios": "pnpm --filter @theatrico/native ios",
+    "native:android": "pnpm --filter @theatrico/native android"
   }
 }
