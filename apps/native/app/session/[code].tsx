@@ -44,7 +44,7 @@ export default function AudienceScreen() {
 
         {isLoading ? (
           <View className="flex-1 items-center justify-center gap-3">
-            <ActivityIndicator color="#e94560" size="large" />
+            <ActivityIndicator color="#b31e35" size="large" />
             <Text className="text-sm text-app-muted">Loading script…</Text>
           </View>
         ) : error ? (

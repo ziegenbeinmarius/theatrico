@@ -53,7 +53,7 @@ export default function HomeScreen() {
         </Text>
 
         {playsLoading ? (
-          <ActivityIndicator color="#e94560" className="my-3" />
+          <ActivityIndicator color="#b31e35" className="my-3" />
         ) : playsError ? (
           <Text className="text-[13px] text-app-accent">
             Could not load plays. Check your connection.
@@ -70,7 +70,7 @@ export default function HomeScreen() {
                   onPress={() => setSelectedPlay(play)}
                   className={`rounded-[10px] p-3 border ${
                     isSelected
-                      ? 'bg-[#1a0a20] border-app-accent'
+                      ? 'bg-[#2a0f1a] border-app-accent'
                       : 'bg-app-input border-transparent'
                   }`}
                 >

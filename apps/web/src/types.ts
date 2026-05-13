@@ -1,51 +1,15 @@
-export interface ScriptLine {
-  id: number;
-  character: string;
-  text: string;
-}
+export type {
+  RawLine as ScriptLine,
+  RawScene as ScriptScene,
+  RawAct as ScriptAct,
+  RawScript as Script,
+  RawGetSession as SessionInfo,
+  RawCreateSession as CreateSessionResponse,
+  RawPlayInfo as PlayInfo,
+  RawPlayDetail as PlayDetail,
+} from '@theatrico/shared';
 
-export interface ScriptScene {
-  title: string;
-  lines: ScriptLine[];
-}
-
-export interface ScriptAct {
-  title: string;
-  scenes: ScriptScene[];
-}
-
-export interface Script {
-  title: string;
-  acts: ScriptAct[];
-}
-
-export interface SessionInfo {
-  join_code: string;
-  script: Script;
-  cursor: number;
-  paused: boolean;
-  clients: number;
-  language: string;
-}
-
-export interface CreateSessionResponse {
-  join_code: string;
-  qr_url: string;
-  language: string;
-  script_title: string;
-}
-
-export interface PlayInfo {
-  id: string;
-  title: string;
-}
-
-export interface PlayDetail {
-  id: string;
-  title: string;
-  script: Script;
-}
-
+// Web-specific WebSocket message shapes (backend wire format for the web WS endpoint)
 export interface PositionUpdate {
   type: 'position_update';
   act: number;

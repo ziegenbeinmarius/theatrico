@@ -87,13 +87,13 @@ export function ScriptPositionCard({ play, position, lookahead = 6 }: Props) {
 const styles = StyleSheet.create({
   header: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#2a2a5a',
+    borderBottomColor: '#3d2430',
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   currentLine: {
     borderLeftWidth: 3,
-    borderLeftColor: '#e94560',
+    borderLeftColor: '#b31e35',
     paddingLeft: 12,
   },
   upcomingLine: {
@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
   },
   firstUpcoming: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#2a2a5a',
+    borderTopColor: '#3d2430',
     paddingTop: 12,
   },
 });

@@ -62,7 +62,7 @@ function OptionRow<T extends string>({
     <Pressable
       onPress={() => onSelect(value)}
       className={`flex-row items-center justify-between rounded-[10px] px-4 py-3 border ${
-        selected ? 'bg-[#1a0a20] border-app-accent' : 'bg-app-input border-transparent'
+        selected ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-input border-transparent'
       }`}
     >
       <Text className={`text-sm ${selected ? 'text-app-accent font-semibold' : 'text-app-text'}`}>
@@ -141,7 +141,7 @@ export default function SettingsScreen() {
               keyboardType="url"
               returnKeyType="done"
               placeholder="https://theatrico.fly.dev"
-              placeholderTextColor="#555577"
+              placeholderTextColor="#4d3d48"
             />
             {urlError ? <Text className="text-app-accent text-[12px]">{urlError}</Text> : null}
             <Text className="text-app-tertiary text-[12px]">

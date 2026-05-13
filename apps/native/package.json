@@ -16,6 +16,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@theatrico/shared": "workspace:*",
     "@fugood/react-native-audio-pcm-stream": "^1.1.4",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@react-native-voice/voice": "^3.2.4",
@@ -57,7 +58,8 @@
   "jest": {
     "preset": "jest-expo",
     "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/src/$1"
+      "^@/(.*)$": "<rootDir>/src/$1",
+      "^@theatrico/shared$": "<rootDir>/../../packages/shared/src/index.ts"
     },
     "testMatch": [
       "<rootDir>/src/__tests__/**/*.test.ts"

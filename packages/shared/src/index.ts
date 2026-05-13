@@ -1,2 +1,3 @@
-// Shared TypeScript code for theatrico apps
-export {};
+export * from './types';
+export * from './scriptUtils';
+export * from './scriptMatcher';

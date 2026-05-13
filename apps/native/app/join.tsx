@@ -69,7 +69,7 @@ export default function JoinScreen() {
               value={code}
               onChangeText={(t) => setCode(t.toUpperCase())}
               placeholder="e.g. ABC123"
-              placeholderTextColor="#555577"
+              placeholderTextColor="#4d3d48"
               autoCapitalize="characters"
               keyboardType="default"
               returnKeyType="join"

@@ -19,7 +19,7 @@ function ReconnectOverlay({ status }: { status: WsStatus }) {
       pointerEvents="none"
       className="absolute inset-0 z-10 items-center justify-center gap-3 bg-black/50"
     >
-      <ActivityIndicator color="#e94560" size="large" />
+      <ActivityIndicator color="#b31e35" size="large" />
       <Text className="text-base font-semibold text-app-text">Reconnecting…</Text>
     </View>
   );
@@ -197,7 +197,7 @@ export default function OperatorScreen() {
                 <Text className="text-sm font-semibold text-app-label">← Prev</Text>
               </Pressable>
               <Pressable
-                className={`flex-[1.4] rounded-[10px] py-3 items-center border ${isPaused ? 'bg-[#1a0a20] border-app-accent' : 'bg-app-card border-transparent'}`}
+                className={`flex-[1.4] rounded-[10px] py-3 items-center border ${isPaused ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-card border-transparent'}`}
                 onPress={handleTogglePause}
               >
                 <Text className={`text-sm font-bold ${isPaused ? 'text-app-accent' : 'text-app-label'}`}>
@@ -223,7 +223,7 @@ export default function OperatorScreen() {
 
             {/* Mic button */}
             <Pressable
-              className={`flex-row rounded-[14px] py-[14px] items-center justify-center gap-2 border-2 ${isRecording ? 'bg-[#1a0a20] border-app-accent' : 'bg-app-card border-[#2a2a5a]'}`}
+              className={`flex-row rounded-[14px] py-[14px] items-center justify-center gap-2 border-2 ${isRecording ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-card border-[#3d2430]'}`}
               onPress={handleMicPress}
             >
               <Text className="text-xl">{isRecording ? '⏹' : '🎙'}</Text>
@@ -267,7 +267,7 @@ export default function OperatorScreen() {
 
         {isLoading ? (
           <View className="items-center justify-center flex-1 gap-2">
-            <ActivityIndicator color="#e94560" size="large" />
+            <ActivityIndicator color="#b31e35" size="large" />
             <Text className="text-sm text-app-muted">Loading session…</Text>
           </View>
         ) : error && !session ? (
@@ -313,7 +313,7 @@ export default function OperatorScreen() {
               </Pressable>
               <Pressable
                 className={`flex-[1.4] rounded-[10px] py-3 items-center border ${
-                  isPaused ? 'bg-[#1a0a20] border-app-accent' : 'bg-app-card border-transparent'
+                  isPaused ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-card border-transparent'
                 }`}
                 onPress={handleTogglePause}
               >
@@ -337,7 +337,7 @@ export default function OperatorScreen() {
             {/* Mic button */}
             <Pressable
               className={`flex-row rounded-[14px] py-[14px] items-center justify-center gap-2 border-2 ${
-                isRecording ? 'bg-[#1a0a20] border-app-accent' : 'bg-app-card border-[#2a2a5a]'
+                isRecording ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-card border-[#3d2430]'
               }`}
               onPress={handleMicPress}
             >

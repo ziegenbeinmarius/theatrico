@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   splash: {
     image: './assets/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#130f12',
   },
   ios: {
     supportsTablet: true,
@@ -29,7 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
-      backgroundColor: '#1a1a2e',
+      backgroundColor: '#130f12',
     },
     package: 'com.theatrico.app',
   },

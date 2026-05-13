@@ -8,6 +8,10 @@
     "preview": "pnpm --filter @theatrico/web preview",
     "native": "pnpm --filter @theatrico/native start",
     "native:ios": "pnpm --filter @theatrico/native ios",
-    "native:android": "pnpm --filter @theatrico/native android"
+    "native:android": "pnpm --filter @theatrico/native android",
+    "test:shared": "pnpm --filter @theatrico/shared test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "unrs-resolver"]
   }
 }
