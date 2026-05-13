@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/ziegenbeinmarius/theatrico/internal/annotation"
 	"github.com/ziegenbeinmarius/theatrico/internal/script"
 )
 
@@ -24,13 +25,14 @@ type PlayListItem struct {
 }
 
 type SessionInfoResponse struct {
-	JoinCode      string         `json:"join_code"`
-	Script        *script.Script `json:"script"`
-	Cursor        int            `json:"cursor"`
-	Paused        bool           `json:"paused"`
-	Clients       int            `json:"clients"`
-	ChunkDuration int            `json:"chunk_duration_ms"`
-	Language      string         `json:"language"`
+	JoinCode      string                  `json:"join_code"`
+	Script        *script.Script          `json:"script"`
+	Cursor        int                     `json:"cursor"`
+	Paused        bool                    `json:"paused"`
+	Clients       int                     `json:"clients"`
+	ChunkDuration int                     `json:"chunk_duration_ms"`
+	Language      string                  `json:"language"`
+	Annotations   []annotation.Annotation `json:"annotations"`
 }
 
 type PlayDetailResponse struct {
@@ -39,12 +41,19 @@ type PlayDetailResponse struct {
 	Script *script.Script `json:"script"`
 }
 
+// CueInfo is embedded in position_update messages when the line has cue annotations.
+type CueInfo struct {
+	ID      int64  `json:"id"`
+	Content string `json:"content"`
+}
+
 type PositionUpdate struct {
-	Type      string    `json:"type"`
-	Act       int       `json:"act"`
-	Scene     int       `json:"scene"`
-	Line      int       `json:"line"`
-	Timestamp time.Time `json:"timestamp"`
+	Type      string     `json:"type"`
+	Act       int        `json:"act"`
+	Scene     int        `json:"scene"`
+	Line      int        `json:"line"`
+	Timestamp time.Time  `json:"timestamp"`
+	Cues      []CueInfo  `json:"cues,omitempty"`
 }
 
 type PausedMsg struct {
@@ -72,4 +81,15 @@ type TranscriptMsg struct {
 type OperatorMsg struct {
 	Type string `json:"type"`
 	Line int    `json:"line"` // used for force_position (SeqIdx)
+}
+
+type CreateAnnotationRequest struct {
+	LineIndex int    `json:"line_index"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+}
+
+type UpdateAnnotationRequest struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
 }

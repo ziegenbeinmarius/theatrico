@@ -5,7 +5,7 @@ RUN npm ci
 COPY apps/web/ ./
 RUN npm run build
 
-FROM golang:1.22-alpine AS backend
+FROM golang:1.25-alpine AS backend
 WORKDIR /app
 COPY backend/ ./
 RUN go build -o server ./cmd/server

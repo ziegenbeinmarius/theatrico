@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
+	"github.com/ziegenbeinmarius/theatrico/internal/annotation"
 	"github.com/ziegenbeinmarius/theatrico/internal/api"
 	"github.com/ziegenbeinmarius/theatrico/internal/audio"
 	"github.com/ziegenbeinmarius/theatrico/internal/matcher"
@@ -40,6 +41,7 @@ type server struct {
 	matchWindow    int
 	matchThreshold float64
 	matchMaxJump   int
+	annotations   annotation.Store
 
 	matchersMu sync.Mutex
 	matchers   map[string]*matcher.Matcher // keyed by session ID
@@ -127,6 +129,15 @@ func main() {
 
 	log.Printf("loaded %d play(s): %s", scriptStore.Len(), strings.Join(scriptStore.IDs(), ", "))
 
+	annotDBPath := os.Getenv("ANNOTATIONS_DB")
+	if annotDBPath == "" {
+		annotDBPath = "theatrico.db"
+	}
+	annotStore, err := annotation.NewSQLiteStore(annotDBPath)
+	if err != nil {
+		log.Fatalf("open annotations db: %v", err)
+	}
+
 	srv := &server{
 		scriptStore:    scriptStore,
 		defaultPlayID:  defaultPlayID,
@@ -139,6 +150,7 @@ func main() {
 		matchThreshold: matchThreshold,
 		matchMaxJump:   matchMaxJump,
 		matchers:       make(map[string]*matcher.Matcher),
+		annotations:    annotStore,
 	}
 
 	mux := http.NewServeMux()
@@ -172,16 +184,54 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/scripts/", func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(r.URL.Path, "/api/scripts/")
-		if id == "" {
+		p := strings.TrimPrefix(r.URL.Path, "/api/scripts/")
+		if p == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		// /api/scripts/{id}/annotations
+		if idx := strings.Index(p, "/"); idx != -1 {
+			scriptID := p[:idx]
+			sub := p[idx+1:]
+			if sub == "annotations" {
+				switch r.Method {
+				case http.MethodGet:
+					srv.handleListAnnotations(w, r, scriptID)
+				case http.MethodPost:
+					srv.handleCreateAnnotation(w, r, scriptID)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		switch r.Method {
 		case http.MethodGet:
-			srv.handleGetPlay(w, r, id)
+			srv.handleGetPlay(w, r, p)
 		case http.MethodDelete:
-			srv.handleDeleteScript(w, r, id)
+			srv.handleDeleteScript(w, r, p)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/annotations/", func(w http.ResponseWriter, r *http.Request) {
+		raw := strings.TrimPrefix(r.URL.Path, "/api/annotations/")
+		if raw == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			http.Error(w, "invalid annotation id", http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			srv.handleUpdateAnnotation(w, r, id)
+		case http.MethodDelete:
+			srv.handleDeleteAnnotation(w, r, id)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -267,7 +317,7 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		play, _ = s.scriptStore.Get(s.defaultPlayID)
 	}
 
-	sess, err := s.sessions.Create(req.Language, play.Script, play.FlatLines)
+	sess, err := s.sessions.Create(req.Language, play.ID, play.Script, play.FlatLines)
 	if err != nil {
 		log.Printf("create session: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -293,6 +343,13 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	var annots []annotation.Annotation
+	if sess.ScriptID != "" {
+		annots, _ = s.annotations.ListByScript(sess.ScriptID)
+	}
+	if annots == nil {
+		annots = []annotation.Annotation{}
+	}
 	resp := api.SessionInfoResponse{
 		JoinCode:      sess.JoinCode,
 		Script:        sess.Script,
@@ -301,9 +358,30 @@ func (s *server) handleGetSession(w http.ResponseWriter, r *http.Request, code s
 		Clients:       s.hub.ClientCount(sess.ID),
 		ChunkDuration: int(s.chunkDuration.Milliseconds()),
 		Language:      sess.Language,
+		Annotations:   annots,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+// positionUpdate builds a PositionUpdate for seqIdx, including any cue annotations.
+func (s *server) positionUpdate(sess *session.Session, seqIdx int) api.PositionUpdate {
+	fl := sess.FlatLines[seqIdx]
+	upd := api.PositionUpdate{
+		Type:      "position_update",
+		Act:       fl.ActIdx,
+		Scene:     fl.SceneIdx,
+		Line:      fl.ID,
+		Timestamp: time.Now(),
+	}
+	if sess.ScriptID != "" {
+		if cues, err := s.annotations.ListCuesForLine(sess.ScriptID, seqIdx); err == nil {
+			for _, c := range cues {
+				upd.Cues = append(upd.Cues, api.CueInfo{ID: c.ID, Content: c.Content})
+			}
+		}
+	}
+	return upd
 }
 
 func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code string) {
@@ -320,14 +398,7 @@ func (s *server) handleWebSocket(w http.ResponseWriter, r *http.Request, code st
 	// Send current position before handing conn to the hub client so that
 	// audience members who join mid-session immediately see the right line.
 	if cursor := sess.Cursor(); cursor > 0 && cursor < len(sess.FlatLines) {
-		fl := sess.FlatLines[cursor]
-		if init, merr := json.Marshal(api.PositionUpdate{
-			Type:      "position_update",
-			Act:       fl.ActIdx,
-			Scene:     fl.SceneIdx,
-			Line:      fl.ID,
-			Timestamp: time.Now(),
-		}); merr == nil {
+		if init, merr := json.Marshal(s.positionUpdate(sess, cursor)); merr == nil {
 			conn.WriteMessage(websocket.TextMessage, init) //nolint:errcheck
 		}
 	}
@@ -349,13 +420,7 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 		}
 		if result := m.Match(text); result != nil {
 			sess.SetCursor(result.SeqIdx)
-			update, _ := json.Marshal(api.PositionUpdate{
-				Type:      "position_update",
-				Act:       result.ActIdx,
-				Scene:     result.SceneIdx,
-				Line:      result.ID,
-				Timestamp: time.Now(),
-			})
+			update, _ := json.Marshal(s.positionUpdate(sess, result.SeqIdx))
 			s.hub.Broadcast(sess.ID, update)
 		}
 	}
@@ -395,14 +460,7 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 	sendCurrentPosition := func() {
 		cursor := sess.Cursor()
 		if cursor > 0 && cursor < len(sess.FlatLines) {
-			fl := sess.FlatLines[cursor]
-			data, _ := json.Marshal(api.PositionUpdate{
-				Type:      "position_update",
-				Act:       fl.ActIdx,
-				Scene:     fl.SceneIdx,
-				Line:      fl.ID,
-				Timestamp: time.Now(),
-			})
+			data, _ := json.Marshal(s.positionUpdate(sess, cursor))
 			conn.WriteMessage(websocket.TextMessage, data) //nolint:errcheck
 		}
 	}
@@ -424,15 +482,8 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 		case "force_position":
 			if msg.Line >= 0 && msg.Line < len(sess.FlatLines) {
 				m.ForcePosition(msg.Line)
-				fl := sess.FlatLines[msg.Line]
 				sess.SetCursor(msg.Line)
-				update, _ := json.Marshal(api.PositionUpdate{
-					Type:      "position_update",
-					Act:       fl.ActIdx,
-					Scene:     fl.SceneIdx,
-					Line:      fl.ID,
-					Timestamp: time.Now(),
-				})
+				update, _ := json.Marshal(s.positionUpdate(sess, msg.Line))
 				s.hub.Broadcast(sess.ID, update)
 			}
 		case "pause":
@@ -468,13 +519,7 @@ func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code str
 		m := s.sessionMatcher(sess)
 		if result := m.Match(req.Text); result != nil {
 			sess.SetCursor(result.SeqIdx)
-			update, _ := json.Marshal(api.PositionUpdate{
-				Type:      "position_update",
-				Act:       result.ActIdx,
-				Scene:     result.SceneIdx,
-				Line:      result.ID,
-				Timestamp: time.Now(),
-			})
+			update, _ := json.Marshal(s.positionUpdate(sess, result.SeqIdx))
 			s.hub.Broadcast(sess.ID, update)
 			log.Printf("simulate: matched line id=%d act=%d scene=%d", result.ID, result.ActIdx, result.SceneIdx)
 		}
@@ -540,6 +585,86 @@ func (s *server) handleUploadScript(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDeleteScript(w http.ResponseWriter, r *http.Request, id string) {
 	if !s.scriptStore.Delete(id) {
 		http.Error(w, "script not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) handleListAnnotations(w http.ResponseWriter, r *http.Request, scriptID string) {
+	if _, ok := s.scriptStore.Get(scriptID); !ok {
+		http.Error(w, "script not found", http.StatusNotFound)
+		return
+	}
+	annots, err := s.annotations.ListByScript(scriptID)
+	if err != nil {
+		log.Printf("list annotations: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if annots == nil {
+		annots = []annotation.Annotation{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(annots) //nolint:errcheck
+}
+
+func (s *server) handleCreateAnnotation(w http.ResponseWriter, r *http.Request, scriptID string) {
+	if _, ok := s.scriptStore.Get(scriptID); !ok {
+		http.Error(w, "script not found", http.StatusNotFound)
+		return
+	}
+	var req api.CreateAnnotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Type != "note" && req.Type != "cue" {
+		http.Error(w, `type must be "note" or "cue"`, http.StatusBadRequest)
+		return
+	}
+	a, err := s.annotations.Create(scriptID, req.LineIndex, req.Type, req.Content)
+	if err != nil {
+		log.Printf("create annotation: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(a) //nolint:errcheck
+}
+
+func (s *server) handleUpdateAnnotation(w http.ResponseWriter, r *http.Request, id int64) {
+	var req api.UpdateAnnotationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.Type != "note" && req.Type != "cue" {
+		http.Error(w, `type must be "note" or "cue"`, http.StatusBadRequest)
+		return
+	}
+	a, err := s.annotations.Update(id, req.Type, req.Content)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "annotation not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("update annotation: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(a) //nolint:errcheck
+}
+
+func (s *server) handleDeleteAnnotation(w http.ResponseWriter, r *http.Request, id int64) {
+	if err := s.annotations.Delete(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "annotation not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("delete annotation: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
