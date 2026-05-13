@@ -234,9 +234,7 @@ func (s *server) handleGetPlay(w http.ResponseWriter, r *http.Request, id string
 
 func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req api.CreateSessionRequest
-	if r.ContentLength > 0 {
-		json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
-	}
+	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
 
 	play, ok := s.scriptStore.Get(req.ScriptID)
 	if !ok {
