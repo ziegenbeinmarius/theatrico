@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { Upload, X, FileText, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -9,55 +9,71 @@ interface Props {
   onUploaded: (scriptId: string) => void;
 }
 
+type State = {
+  file: File | null;
+  title: string;
+  preview: string;
+  dragOver: boolean;
+  validationError: string;
+};
+
+type Action =
+  | { type: 'accept_file'; file: File; title: string }
+  | { type: 'set_preview'; preview: string }
+  | { type: 'set_title'; title: string }
+  | { type: 'set_drag_over'; over: boolean }
+  | { type: 'set_error'; message: string };
+
+const initial: State = { file: null, title: '', preview: '', dragOver: false, validationError: '' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'accept_file':
+      return { ...state, file: action.file, title: action.title, preview: '', validationError: '' };
+    case 'set_preview':
+      return { ...state, preview: action.preview };
+    case 'set_title':
+      return { ...state, title: action.title };
+    case 'set_drag_over':
+      return { ...state, dragOver: action.over };
+    case 'set_error':
+      return { ...state, validationError: action.message };
+  }
+}
+
 export function ScriptUploadModal({ onClose, onUploaded }: Props) {
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
-  const [preview, setPreview] = useState('');
-  const [dragOver, setDragOver] = useState(false);
-  const [validationError, setValidationError] = useState('');
+  const [state, dispatch] = useReducer(reducer, initial);
+  const { file, title, preview, dragOver, validationError } = state;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const upload = useUploadScriptMutation();
 
   function acceptFile(f: File) {
     if (!f.name.endsWith('.md') && f.type !== 'text/markdown') {
-      setValidationError('Only .md (Markdown) files are supported.');
+      dispatch({ type: 'set_error', message: 'Only .md (Markdown) files are supported.' });
       return;
     }
     if (f.size > 1_000_000) {
-      setValidationError('File is too large. Maximum size is 1 MB.');
+      dispatch({ type: 'set_error', message: 'File is too large. Maximum size is 1 MB.' });
       return;
     }
-    setValidationError('');
-    setFile(f);
-    setTitle(f.name.replace(/\.md$/i, ''));
+    dispatch({ type: 'accept_file', file: f, title: f.name.replace(/\.md$/i, '') });
     const reader = new FileReader();
-    reader.onload = (e) => setPreview((e.target?.result as string) ?? '');
+    reader.onload = (e) => dispatch({ type: 'set_preview', preview: (e.target?.result as string) ?? '' });
     reader.readAsText(f);
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) acceptFile(f);
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragOver(false);
+    dispatch({ type: 'set_drag_over', over: false });
     const f = e.dataTransfer.files?.[0];
     if (f) acceptFile(f);
   }, []);
 
   function handleSubmit() {
     if (!file || !title.trim()) return;
-    upload.mutate(
-      { file, title: title.trim() },
-      {
-        onSuccess: (data) => onUploaded(data.id),
-      },
-    );
+    upload.mutate({ file, title: title.trim() }, { onSuccess: (data) => onUploaded(data.id) });
   }
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -84,8 +100,8 @@ export function ScriptUploadModal({ onClose, onUploaded }: Props) {
         <div className="flex flex-col gap-4 p-5 overflow-y-auto flex-1">
           {/* Drop zone */}
           <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
+            onDragOver={(e) => { e.preventDefault(); dispatch({ type: 'set_drag_over', over: true }); }}
+            onDragLeave={() => dispatch({ type: 'set_drag_over', over: false })}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             className={`cursor-pointer rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors ${
@@ -101,7 +117,7 @@ export function ScriptUploadModal({ onClose, onUploaded }: Props) {
               type="file"
               accept=".md,text/markdown"
               className="hidden"
-              onChange={handleFileChange}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) acceptFile(f); }}
             />
             {file ? (
               <div className="flex items-center justify-center gap-2 text-sm text-green-400">
@@ -125,19 +141,17 @@ export function ScriptUploadModal({ onClose, onUploaded }: Props) {
             </div>
           )}
 
-          {/* Title input */}
           {file && (
             <div>
               <label className="mb-1.5 block text-sm text-muted-foreground">Title</label>
               <Input
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => dispatch({ type: 'set_title', title: e.target.value })}
                 placeholder="Script title"
               />
             </div>
           )}
 
-          {/* Preview */}
           {preview && (
             <div>
               <p className="mb-1.5 text-sm text-muted-foreground">Preview</p>
@@ -160,10 +174,7 @@ export function ScriptUploadModal({ onClose, onUploaded }: Props) {
           <Button variant="outline" onClick={onClose} disabled={upload.isPending}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={!file || !title.trim() || upload.isPending}
-          >
+          <Button onClick={handleSubmit} disabled={!file || !title.trim() || upload.isPending}>
             {upload.isPending ? 'Uploading…' : 'Upload Script'}
           </Button>
         </div>
