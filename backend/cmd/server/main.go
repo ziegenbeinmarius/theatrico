@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -29,7 +30,7 @@ var upgrader = websocket.Upgrader{
 }
 
 type server struct {
-	scriptStore   script.ScriptStore
+	scriptStore   *script.MutableStore
 	defaultPlayID string
 	sessions      session.Repository
 	hub           *ws.Hub
@@ -111,7 +112,7 @@ func main() {
 		rec = recognizer.New(apiKey)
 	}
 
-	scriptStore, err := script.NewFileStore(scriptsDir)
+	scriptStore, err := script.NewMutableStore(scriptsDir)
 	if err != nil {
 		log.Fatalf("load plays: %v", err)
 	}
@@ -159,6 +160,31 @@ func main() {
 			return
 		}
 		srv.handleGetPlay(w, r, id)
+	})
+	mux.HandleFunc("/api/scripts", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			srv.handleListPlays(w, r)
+		case http.MethodPost:
+			srv.handleUploadScript(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/scripts/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/scripts/")
+		if id == "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			srv.handleGetPlay(w, r, id)
+		case http.MethodDelete:
+			srv.handleDeleteScript(w, r, id)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -455,6 +481,67 @@ func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code str
 	}
 
 	log.Printf("simulate: text=%q join_code=%s", req.Text, code)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+const maxUploadSize = 1 << 20 // 1 MB
+
+func (s *server) handleUploadScript(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	var rawMD, title string
+	ct := r.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+			http.Error(w, "request too large or malformed", http.StatusBadRequest)
+			return
+		}
+		title = r.FormValue("title")
+		f, _, err := r.FormFile("script")
+		if err != nil {
+			http.Error(w, "missing 'script' file field in multipart form", http.StatusBadRequest)
+			return
+		}
+		defer f.Close()
+		data, err := io.ReadAll(f)
+		if err != nil {
+			http.Error(w, "could not read uploaded file", http.StatusBadRequest)
+			return
+		}
+		rawMD = string(data)
+	} else {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "could not read request body", http.StatusBadRequest)
+			return
+		}
+		rawMD = string(data)
+		title = r.URL.Query().Get("title")
+	}
+
+	if strings.TrimSpace(rawMD) == "" {
+		http.Error(w, "script content is empty", http.StatusBadRequest)
+		return
+	}
+
+	id, err := s.scriptStore.Add(title, rawMD)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid script: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	entry, _ := s.scriptStore.Get(id)
+	resp := api.PlayDetailResponse{ID: entry.ID, Title: entry.Title, Script: entry.Script}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+}
+
+func (s *server) handleDeleteScript(w http.ResponseWriter, r *http.Request, id string) {
+	if !s.scriptStore.Delete(id) {
+		http.Error(w, "script not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
