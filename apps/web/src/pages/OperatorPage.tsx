@@ -13,8 +13,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import {
   useCreateSessionMutation,
   useDeleteScriptMutation,
-  usePlaysQuery,
-  usePlayQuery,
+  useScriptsQuery,
+  useScriptQuery,
   useSessionQuery,
 } from "../hooks/useSessions";
 import {
@@ -103,7 +103,7 @@ type WebAudioWindow = Window & typeof globalThis & {
 
 
 export function OperatorPage() {
-  const playsQuery = usePlaysQuery();
+  const scriptsQuery = useScriptsQuery();
   const createSession = useCreateSessionMutation();
   const deleteScript = useDeleteScriptMutation();
   const [joinCode, setJoinCode] = useState<string | null>(null);
@@ -116,7 +116,7 @@ export function OperatorPage() {
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [selectedScript, setSelectedScript] = useState('');
 
-  const playQuery = usePlayQuery(selectedScript || undefined);
+  const scriptQuery = useScriptQuery(selectedScript || undefined);
   const [streaming, setStreaming] = useState(false);
   const [streamStarting, setStreamStarting] = useState(false);
   const [transcripts, setTranscripts] = useState<string[]>([]);
@@ -125,7 +125,7 @@ export function OperatorPage() {
   const [clients, setClients] = useState(0);
   const [streamError, setStreamError] = useState('');
 
-  const displayScript = session?.script ?? playQuery.data?.script ?? null;
+  const displayScript = session?.script ?? scriptQuery.data?.script ?? null;
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioWsRef = useRef<WebSocket | null>(null);
@@ -467,8 +467,8 @@ export function OperatorPage() {
       <div className="mx-auto w-full max-w-[90rem] flex flex-col gap-6 flex-1 min-h-0">
         {/* Header */}
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex h-11 w-11 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
-            <Clapperboard className="h-5 w-5" aria-hidden="true" />
+          <div className="flex items-center justify-center rounded-md h-11 w-11 bg-secondary text-secondary-foreground">
+            <Clapperboard className="w-5 h-5" aria-hidden="true" />
           </div>
           <div>
             <h1 className="text-3xl font-semibold tracking-normal">
@@ -477,9 +477,9 @@ export function OperatorPage() {
             <p className="text-sm text-muted-foreground">Operator console</p>
           </div>
           {session && (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
               <Badge variant="outline" className="gap-1.5">
-                <Users className="h-3 w-3" />
+                <Users className="w-3 h-3" />
                 {clients} audience
               </Badge>
             </div>
@@ -514,15 +514,15 @@ export function OperatorPage() {
                       rel="noopener noreferrer"
                       className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <ExternalLink className="h-3 w-3" />
+                      <ExternalLink className="w-3 h-3" />
                       Open display view
                     </a>
                     {/* Compact script meta */}
                     {displayScript && (
-                      <div className="rounded-md bg-black/20 px-3 py-2 text-xs text-muted-foreground space-y-1">
+                      <div className="px-3 py-2 space-y-1 text-xs rounded-md bg-black/20 text-muted-foreground">
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1.5">
-                            <ScrollText className="h-3 w-3" />
+                            <ScrollText className="w-3 h-3" />
                             {displayScript.title}
                           </span>
                           <span>
@@ -552,21 +552,21 @@ export function OperatorPage() {
                         </label>
                         <button
                           onClick={() => setShowUploadModal(true)}
-                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          className="flex items-center gap-1 text-xs transition-colors text-muted-foreground hover:text-foreground"
                         >
-                          <Upload className="h-3 w-3" />
+                          <Upload className="w-3 h-3" />
                           Upload Script
                         </button>
                       </div>
                       <select
                         value={selectedScript}
                         onChange={(e) => setSelectedScript(e.target.value)}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
                         <option value="" disabled>
                           Select a play…
                         </option>
-                        {playsQuery.data
+                        {scriptsQuery.data
                           ?.filter((p: PlayInfo) => p.id !== "default")
                           .map((p: PlayInfo) => (
                             <option key={p.id} value={p.id}>
@@ -582,7 +582,7 @@ export function OperatorPage() {
                       <select
                         value={selectedLanguage}
                         onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
                         {LANGUAGES.map((l) => (
                           <option key={l.code} value={l.code}>
@@ -603,11 +603,11 @@ export function OperatorPage() {
                     >
                       {createSession.isPending ? (
                         <RefreshCw
-                          className="h-5 w-5 animate-spin"
+                          className="w-5 h-5 animate-spin"
                           aria-hidden="true"
                         />
                       ) : (
-                        <PlusCircle className="h-5 w-5" aria-hidden="true" />
+                        <PlusCircle className="w-5 h-5" aria-hidden="true" />
                       )}
                       New Session
                     </Button>
@@ -624,50 +624,59 @@ export function OperatorPage() {
             </Card>
 
             {/* Script management */}
-            {!session && playsQuery.data && playsQuery.data.filter((p: PlayInfo) => p.id !== 'default').length > 0 && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <ScrollText className="h-5 w-5 text-secondary" aria-hidden="true" />
-                    <CardTitle>Scripts</CardTitle>
-                  </div>
-                  <CardDescription>Manage uploaded scripts.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {playsQuery.data
-                    .filter((p: PlayInfo) => p.id !== 'default')
-                    .map((p: PlayInfo) => (
-                      <div
-                        key={p.id}
-                        className="flex items-center justify-between rounded-md bg-black/20 px-3 py-2"
-                      >
-                        <span className="text-sm truncate">{p.title}</span>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Delete "${p.title}"?`)) {
-                              deleteScript.mutate(p.id, {
-                                onSuccess: () => {
-                                  if (selectedScript === p.id) setSelectedScript('');
-                                },
-                              });
-                            }
-                          }}
-                          disabled={deleteScript.isPending}
-                          className="ml-2 shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-                          title="Delete script"
+            {!session &&
+              scriptsQuery.data &&
+              scriptsQuery.data.filter((p: PlayInfo) => p.id !== "default")
+                .length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
+                      <ScrollText
+                        className="w-5 h-5 text-secondary"
+                        aria-hidden="true"
+                      />
+                      <CardTitle>Scripts</CardTitle>
+                    </div>
+                    <CardDescription>Manage uploaded scripts.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {scriptsQuery.data
+                      .filter((p: PlayInfo) => p.id !== "default")
+                      .map((p: PlayInfo) => (
+                        <div
+                          key={p.id}
+                          className="flex items-center justify-between px-3 py-2 rounded-md bg-black/20"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  {deleteScript.isError && (
-                    <p className="text-xs text-destructive">
-                      {deleteScript.error instanceof Error ? deleteScript.error.message : 'Delete failed.'}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+                          <span className="text-sm truncate">{p.title}</span>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Delete "${p.title}"?`)) {
+                                deleteScript.mutate(p.id, {
+                                  onSuccess: () => {
+                                    if (selectedScript === p.id)
+                                      setSelectedScript("");
+                                  },
+                                });
+                              }
+                            }}
+                            disabled={deleteScript.isPending}
+                            className="ml-2 transition-colors shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                            title="Delete script"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    {deleteScript.isError && (
+                      <p className="text-xs text-destructive">
+                        {deleteScript.error instanceof Error
+                          ? deleteScript.error.message
+                          : "Delete failed."}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
             {/* Microphone / streaming */}
             {session && (
@@ -675,7 +684,7 @@ export function OperatorPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <Mic
-                      className="h-5 w-5 text-secondary"
+                      className="w-5 h-5 text-secondary"
                       aria-hidden="true"
                     />
                     <CardTitle>Microphone</CardTitle>
@@ -689,7 +698,7 @@ export function OperatorPage() {
                     value={selectedDeviceId}
                     onChange={(e) => setSelectedDeviceId(e.target.value)}
                     disabled={streaming || streamStarting}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                    className="w-full px-3 py-2 text-sm border rounded-md border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                   >
                     {devices.length === 0 && (
                       <option value="">Default microphone</option>
@@ -709,11 +718,11 @@ export function OperatorPage() {
                       >
                         {streamStarting ? (
                           <RefreshCw
-                            className="h-4 w-4 animate-spin"
+                            className="w-4 h-4 animate-spin"
                             aria-hidden="true"
                           />
                         ) : (
-                          <Radio className="h-4 w-4" aria-hidden="true" />
+                          <Radio className="w-4 h-4" aria-hidden="true" />
                         )}
                         {streamStarting ? "Starting..." : "Start Streaming"}
                       </Button>
@@ -723,15 +732,15 @@ export function OperatorPage() {
                         onClick={stopStreaming}
                         className="gap-2"
                       >
-                        <StopCircle className="h-4 w-4" aria-hidden="true" />
+                        <StopCircle className="w-4 h-4" aria-hidden="true" />
                         Stop Streaming
                       </Button>
                     )}
                     {streaming && (
                       <span className="flex items-center gap-1.5 text-sm text-green-400">
-                        <span className="relative flex h-2 w-2">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-400" />
+                        <span className="relative flex w-2 h-2">
+                          <span className="absolute inline-flex w-full h-full bg-green-400 rounded-full opacity-75 animate-ping" />
+                          <span className="relative inline-flex w-2 h-2 bg-green-400 rounded-full" />
                         </span>
                         Live
                       </span>
@@ -753,7 +762,7 @@ export function OperatorPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <ScrollText
-                        className="h-5 w-5 text-secondary"
+                        className="w-5 h-5 text-secondary"
                         aria-hidden="true"
                       />
                       <CardTitle>
@@ -796,11 +805,11 @@ export function OperatorPage() {
 
                 {/* Transcript strip — visible only when a session is active */}
                 {session && (
-                  <div className="shrink-0 border-b border-border px-4 pb-3">
+                  <div className="px-4 pb-3 border-b shrink-0 border-border">
                     <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                       Live transcript
                     </p>
-                    <div className="max-h-24 overflow-y-auto rounded-md bg-black/30 px-3 py-2 text-sm leading-relaxed">
+                    <div className="px-3 py-2 overflow-y-auto text-sm leading-relaxed rounded-md max-h-24 bg-black/30">
                       {transcripts.length === 0 ? (
                         <span className="text-muted-foreground">
                           Transcript will appear here once streaming starts…
@@ -817,7 +826,7 @@ export function OperatorPage() {
                   </div>
                 )}
 
-                <CardContent className="flex-1 min-h-0 overflow-y-auto p-0">
+                <CardContent className="flex-1 min-h-0 p-0 overflow-y-auto">
                   <ScriptRenderer
                     script={displayScript}
                     highlightedLine={position}

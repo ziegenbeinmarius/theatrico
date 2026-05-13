@@ -21,12 +21,12 @@ export function getSession(code: string) {
   return request<SessionInfo>(`/api/sessions/${code.toUpperCase()}`);
 }
 
-export function getPlays() {
-  return request<PlayInfo[]>('/api/plays');
+export function getScripts() {
+  return request<PlayInfo[]>('/api/scripts');
 }
 
-export function getPlay(id: string) {
-  return request<PlayDetail>(`/api/plays/${encodeURIComponent(id)}`);
+export function getScript(id: string) {
+  return request<PlayDetail>(`/api/scripts/${encodeURIComponent(id)}`);
 }
 
 export function createSession(params: { language?: string; scriptId?: string }) {

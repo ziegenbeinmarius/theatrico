@@ -10,7 +10,7 @@
         "simulator": true
       },
       "env": {
-        "BACKEND_URL": "https://theatrico.fly.dev"
+        "BACKEND_URL": "http://localhost:8085"
       }
     },
     "development-device": {

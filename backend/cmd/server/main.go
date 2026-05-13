@@ -19,6 +19,7 @@ import (
 	"github.com/ziegenbeinmarius/theatrico/internal/annotation"
 	"github.com/ziegenbeinmarius/theatrico/internal/api"
 	"github.com/ziegenbeinmarius/theatrico/internal/audio"
+	"github.com/ziegenbeinmarius/theatrico/internal/db"
 	"github.com/ziegenbeinmarius/theatrico/internal/matcher"
 	"github.com/ziegenbeinmarius/theatrico/internal/recognizer"
 	"github.com/ziegenbeinmarius/theatrico/internal/script"
@@ -31,17 +32,18 @@ var upgrader = websocket.Upgrader{
 }
 
 type server struct {
-	scriptStore   *script.MutableStore
-	defaultPlayID string
-	sessions      session.Repository
-	hub           *ws.Hub
-	rec           recognizer.Recognizer
-	host          string
-	chunkDuration time.Duration
+	scripts        script.Repository
+	defaultPlayID  string
+	sessions       session.Repository
+	persistSession func(*session.Session)
+	annotations    annotation.Store
+	hub            *ws.Hub
+	rec            recognizer.Recognizer
+	host           string
+	chunkDuration  time.Duration
 	matchWindow    int
 	matchThreshold float64
 	matchMaxJump   int
-	annotations   annotation.Store
 
 	matchersMu sync.Mutex
 	matchers   map[string]*matcher.Matcher // keyed by session ID
@@ -114,34 +116,39 @@ func main() {
 		rec = recognizer.New(apiKey)
 	}
 
-	scriptStore, err := script.NewMutableStore(scriptsDir)
-	if err != nil {
-		log.Fatalf("load plays: %v", err)
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "theatrico.db"
 	}
-	if scriptStore.Len() == 0 {
+	conn, err := db.Open(dbPath)
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+
+	scripts, err := script.NewSQLiteStore(conn, scriptsDir)
+	if err != nil {
+		log.Fatalf("load scripts: %v", err)
+	}
+	if scripts.Len() == 0 {
 		log.Fatalf("no script files found in %s", scriptsDir)
 	}
-	if _, ok := scriptStore.Get(defaultPlayID); !ok {
-		// Fall back to first play if default not found.
-		defaultPlayID = scriptStore.FirstID()
+	if _, ok := scripts.Get(defaultPlayID); !ok {
+		defaultPlayID = scripts.FirstID()
 		log.Printf("warning: default script %q not found, using %q", scriptPath, defaultPlayID)
 	}
+	log.Printf("loaded %d script(s): %s", scripts.Len(), strings.Join(scripts.IDs(), ", "))
 
-	log.Printf("loaded %d play(s): %s", scriptStore.Len(), strings.Join(scriptStore.IDs(), ", "))
-
-	annotDBPath := os.Getenv("ANNOTATIONS_DB")
-	if annotDBPath == "" {
-		annotDBPath = "theatrico.db"
-	}
-	annotStore, err := annotation.NewSQLiteStore(annotDBPath)
+	sessions, err := session.NewSQLiteStore(conn, scripts)
 	if err != nil {
-		log.Fatalf("open annotations db: %v", err)
+		log.Fatalf("init session store: %v", err)
 	}
 
 	srv := &server{
-		scriptStore:    scriptStore,
+		scripts:        scripts,
 		defaultPlayID:  defaultPlayID,
-		sessions:       session.NewMemoryStore(),
+		sessions:       sessions,
+		persistSession: sessions.Persist,
+		annotations:    annotation.NewSQLiteStore(conn),
 		hub:            ws.NewHub(),
 		rec:            rec,
 		host:           host,
@@ -150,33 +157,13 @@ func main() {
 		matchThreshold: matchThreshold,
 		matchMaxJump:   matchMaxJump,
 		matchers:       make(map[string]*matcher.Matcher),
-		annotations:    annotStore,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/plays", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		srv.handleListPlays(w, r)
-	})
-	mux.HandleFunc("/api/plays/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		id := strings.TrimPrefix(r.URL.Path, "/api/plays/")
-		if id == "" {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		srv.handleGetPlay(w, r, id)
-	})
 	mux.HandleFunc("/api/scripts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			srv.handleListPlays(w, r)
+			srv.handleListScripts(w, r)
 		case http.MethodPost:
 			srv.handleUploadScript(w, r)
 		default:
@@ -209,7 +196,7 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			srv.handleGetPlay(w, r, p)
+			srv.handleGetScript(w, r, p)
 		case http.MethodDelete:
 			srv.handleDeleteScript(w, r, p)
 		default:
@@ -287,8 +274,8 @@ func main() {
 	}
 }
 
-func (s *server) handleListPlays(w http.ResponseWriter, r *http.Request) {
-	plays := s.scriptStore.List()
+func (s *server) handleListScripts(w http.ResponseWriter, r *http.Request) {
+	plays := s.scripts.List()
 	items := make([]api.PlayListItem, 0, len(plays))
 	for _, p := range plays {
 		items = append(items, api.PlayListItem{ID: p.ID, Title: p.Title})
@@ -297,8 +284,8 @@ func (s *server) handleListPlays(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(items) //nolint:errcheck
 }
 
-func (s *server) handleGetPlay(w http.ResponseWriter, r *http.Request, id string) {
-	play, ok := s.scriptStore.Get(id)
+func (s *server) handleGetScript(w http.ResponseWriter, r *http.Request, id string) {
+	play, ok := s.scripts.Get(id)
 	if !ok {
 		http.Error(w, "play not found", http.StatusNotFound)
 		return
@@ -312,12 +299,12 @@ func (s *server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	var req api.CreateSessionRequest
 	json.NewDecoder(r.Body).Decode(&req) //nolint:errcheck
 
-	play, ok := s.scriptStore.Get(req.ScriptID)
+	play, ok := s.scripts.Get(req.ScriptID)
 	if !ok {
-		play, _ = s.scriptStore.Get(s.defaultPlayID)
+		play, _ = s.scripts.Get(s.defaultPlayID)
 	}
 
-	sess, err := s.sessions.Create(req.Language, play.ID, play.Script, play.FlatLines)
+	sess, err := s.sessions.Create(play.ID, req.Language, play.Script, play.FlatLines)
 	if err != nil {
 		log.Printf("create session: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -420,7 +407,14 @@ func (s *server) handleAudioWS(w http.ResponseWriter, r *http.Request, code stri
 		}
 		if result := m.Match(text); result != nil {
 			sess.SetCursor(result.SeqIdx)
-			update, _ := json.Marshal(s.positionUpdate(sess, result.SeqIdx))
+			s.persistSession(sess)
+			update, _ := json.Marshal(api.PositionUpdate{
+				Type:      "position_update",
+				Act:       result.ActIdx,
+				Scene:     result.SceneIdx,
+				Line:      result.ID,
+				Timestamp: time.Now(),
+			})
 			s.hub.Broadcast(sess.ID, update)
 		}
 	}
@@ -482,16 +476,26 @@ func (s *server) handleOperatorWS(w http.ResponseWriter, r *http.Request, code s
 		case "force_position":
 			if msg.Line >= 0 && msg.Line < len(sess.FlatLines) {
 				m.ForcePosition(msg.Line)
+				fl := sess.FlatLines[msg.Line]
 				sess.SetCursor(msg.Line)
-				update, _ := json.Marshal(s.positionUpdate(sess, msg.Line))
+				s.persistSession(sess)
+				update, _ := json.Marshal(api.PositionUpdate{
+					Type:      "position_update",
+					Act:       fl.ActIdx,
+					Scene:     fl.SceneIdx,
+					Line:      fl.ID,
+					Timestamp: time.Now(),
+				})
 				s.hub.Broadcast(sess.ID, update)
 			}
 		case "pause":
 			sess.SetPaused(true)
+			s.persistSession(sess)
 			data, _ := json.Marshal(api.PausedMsg{Type: "paused", Paused: true})
 			s.hub.Broadcast(sess.ID, data)
 		case "resume":
 			sess.SetPaused(false)
+			s.persistSession(sess)
 			data, _ := json.Marshal(api.PausedMsg{Type: "paused", Paused: false})
 			s.hub.Broadcast(sess.ID, data)
 		}
@@ -519,7 +523,14 @@ func (s *server) handleSimulate(w http.ResponseWriter, r *http.Request, code str
 		m := s.sessionMatcher(sess)
 		if result := m.Match(req.Text); result != nil {
 			sess.SetCursor(result.SeqIdx)
-			update, _ := json.Marshal(s.positionUpdate(sess, result.SeqIdx))
+			s.persistSession(sess)
+			update, _ := json.Marshal(api.PositionUpdate{
+				Type:      "position_update",
+				Act:       result.ActIdx,
+				Scene:     result.SceneIdx,
+				Line:      result.ID,
+				Timestamp: time.Now(),
+			})
 			s.hub.Broadcast(sess.ID, update)
 			log.Printf("simulate: matched line id=%d act=%d scene=%d", result.ID, result.ActIdx, result.SceneIdx)
 		}
@@ -569,13 +580,13 @@ func (s *server) handleUploadScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.scriptStore.Add(title, rawMD)
+	id, err := s.scripts.Add(title, rawMD)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("invalid script: %s", err), http.StatusBadRequest)
 		return
 	}
 
-	entry, _ := s.scriptStore.Get(id)
+	entry, _ := s.scripts.Get(id)
 	resp := api.PlayDetailResponse{ID: entry.ID, Title: entry.Title, Script: entry.Script}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -583,15 +594,16 @@ func (s *server) handleUploadScript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteScript(w http.ResponseWriter, r *http.Request, id string) {
-	if !s.scriptStore.Delete(id) {
+	if !s.scripts.Delete(id) {
 		http.Error(w, "script not found", http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+
 func (s *server) handleListAnnotations(w http.ResponseWriter, r *http.Request, scriptID string) {
-	if _, ok := s.scriptStore.Get(scriptID); !ok {
+	if _, ok := s.scripts.Get(scriptID); !ok {
 		http.Error(w, "script not found", http.StatusNotFound)
 		return
 	}
@@ -609,7 +621,7 @@ func (s *server) handleListAnnotations(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *server) handleCreateAnnotation(w http.ResponseWriter, r *http.Request, scriptID string) {
-	if _, ok := s.scriptStore.Get(scriptID); !ok {
+	if _, ok := s.scripts.Get(scriptID); !ok {
 		http.Error(w, "script not found", http.StatusNotFound)
 		return
 	}

@@ -16,8 +16,8 @@ const joinCodeLen = 6
 type Session struct {
 	ID        string
 	JoinCode  string
+	ScriptID  string
 	Script    *script.Script
-	ScriptID  string            // ID of the script used in this session
 	FlatLines []script.FlatLine
 	Language  string // ISO-639-1 code for Whisper STT; empty means auto-detect
 	CreatedAt time.Time
@@ -57,7 +57,7 @@ func (s *Session) SetPaused(p bool) {
 
 // Repository is the interface for session storage.
 type Repository interface {
-	Create(language, scriptID string, scr *script.Script, flatLines []script.FlatLine) (*Session, error)
+	Create(scriptID, language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error)
 	Get(code string) (*Session, bool)
 }
 
@@ -83,7 +83,7 @@ func generateCode() (string, error) {
 	return string(b), nil
 }
 
-func (s *MemoryStore) Create(language, scriptID string, scr *script.Script, flatLines []script.FlatLine) (*Session, error) {
+func (s *MemoryStore) Create(scriptID, language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -102,8 +102,8 @@ func (s *MemoryStore) Create(language, scriptID string, scr *script.Script, flat
 	sess := &Session{
 		ID:        code,
 		JoinCode:  code,
-		Script:    scr,
 		ScriptID:  scriptID,
+		Script:    scr,
 		FlatLines: flatLines,
 		Language:  language,
 		CreatedAt: time.Now(),
