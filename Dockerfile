@@ -1,9 +1,15 @@
 FROM node:20-alpine AS frontend
-WORKDIR /app/apps/web
-COPY apps/web/package*.json ./
-RUN npm ci
-COPY apps/web/ ./
-RUN npm run build
+WORKDIR /app
+RUN corepack enable
+RUN corepack prepare pnpm@9.15.9 --activate
+
+# Install workspace dependencies so web build tools and local packages resolve correctly.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/ ./apps/web/
+COPY apps/native/package.json ./apps/native/package.json
+COPY packages/shared/ ./packages/shared/
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter ./apps/web build
 
 FROM golang:1.25-alpine AS backend
 WORKDIR /app
