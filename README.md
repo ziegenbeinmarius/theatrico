@@ -62,6 +62,113 @@ pnpm build
 
 After building, `cd backend && go run ./cmd/server` serves the PWA and API on one port.
 
+## Quick Start (Backend + Web)
+
+From repo root:
+
+```sh
+pnpm install
+
+# Terminal 1: backend
+cd backend
+export OPENAI_API_KEY=sk-...
+go run ./cmd/server
+
+# Terminal 2: web app
+cd apps/web
+pnpm dev
+```
+
+Open `http://localhost:5173` for web development.
+
+## Native App (Expo)
+
+Install dependencies once:
+
+```sh
+pnpm install
+cd apps/native
+```
+
+### Run On Physical iOS Device (local native build)
+
+```sh
+cd apps/native
+npx expo run:ios --device
+```
+
+Notes:
+
+- Requires Xcode and an iOS signing setup on your Mac.
+- If prompted, select your connected device from the list.
+- This compiles and installs a dev build directly to the phone.
+
+### Run On Physical Android Device (local native build)
+
+```sh
+cd apps/native
+npx expo run:android --device
+```
+
+Notes:
+
+- Requires Android SDK/ADB configured and USB debugging enabled.
+- Verify device visibility with `adb devices`.
+
+## EAS Build Workflows
+
+The native project has EAS profiles in `apps/native/eas.json`:
+
+- `development` uses `BACKEND_URL=http://localhost:8085` (simulator/dev local flow).
+- `development-device` uses `BACKEND_URL=https://theatrico.fly.dev` (physical devices).
+- `preview` and `production` also target `https://theatrico.fly.dev`.
+
+### First-time setup
+
+```sh
+cd apps/native
+eas login
+eas build:configure
+```
+
+### Build dev client for physical devices (recommended)
+
+```sh
+cd apps/native
+eas build --profile development-device --platform ios
+eas build --profile development-device --platform android
+```
+
+Install the resulting builds from EAS links/QR on your devices, then start Metro for the dev client:
+
+```sh
+cd apps/native
+npx expo start --dev-client
+```
+
+### Build preview/production binaries
+
+```sh
+cd apps/native
+eas build --profile preview --platform ios
+eas build --profile preview --platform android
+
+eas build --profile production --platform ios
+eas build --profile production --platform android
+```
+
+### Optional local override for backend URL
+
+For local `expo run:*` commands, you can force the backend URL at build time:
+
+```sh
+cd apps/native
+BACKEND_URL=https://theatrico.fly.dev npx expo run:ios --device
+BACKEND_URL=https://theatrico.fly.dev npx expo run:android --device
+```
+
+At runtime, backend URL can also be changed in the app Settings screen.
+
 ## API
 
 - `GET /api/script` — full parsed script as JSON

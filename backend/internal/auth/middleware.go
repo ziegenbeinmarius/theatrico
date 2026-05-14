@@ -8,6 +8,20 @@ import (
 // CookieName is the name of the httpOnly session cookie.
 const CookieName = "theatrico_token"
 
+func writeUnauthorized(w http.ResponseWriter) {
+	// Clear any stale auth cookie so browser clients recover cleanly on the next request.
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+	w.Header().Set("X-Theatrico-Auth", "invalid")
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+}
+
 // RequireAuth wraps an HTTP handler, validating the JWT from the
 // Authorization: Bearer header or the theatrico_token cookie.
 func (s *Store) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -19,12 +33,12 @@ func (s *Store) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 			tokenStr = c.Value
 		}
 		if tokenStr == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeUnauthorized(w)
 			return
 		}
 		operatorID, err := s.Validate(tokenStr)
 		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeUnauthorized(w)
 			return
 		}
 		next(w, r.WithContext(WithOperatorID(r.Context(), operatorID)))
