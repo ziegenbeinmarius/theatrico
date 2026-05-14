@@ -6,6 +6,7 @@ node_modules/
 .DS_Store
 
 apps/web/dist
+theatrico.db
 
 # Native app (React Native / Expo)
 apps/native/ios/
