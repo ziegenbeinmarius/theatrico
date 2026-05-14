@@ -1,4 +1,4 @@
-import { ActivityIndicator, Alert, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
@@ -226,12 +226,14 @@ export default function OperatorScreen() {
               </Pressable>
             </View>
 
-            {/* Recognizer toggle */}
-            <RecognizerToggle
-              value={recognizer.type}
-              onChange={(type) => switchRecognizer(type)}
-              disabled={isRecording}
-            />
+            {/* Recognizer toggle — iOS only */}
+            {Platform.OS === 'ios' && (
+              <RecognizerToggle
+                value={recognizer.type}
+                onChange={(type) => switchRecognizer(type)}
+                disabled={isRecording}
+              />
+            )}
 
             {/* Transcript */}
             <View className="flex-1 min-h-[60px] overflow-hidden bg-app-card rounded-xl">
@@ -306,13 +308,15 @@ export default function OperatorScreen() {
                 <Text className="text-[10px] text-app-tertiary font-bold tracking-[1px]">SESSION</Text>
                 <Text className="text-base text-app-text font-extrabold tracking-[3px]">{sessionCode}</Text>
               </View>
-              <View className="flex-1">
-                <RecognizerToggle
-                  value={recognizer.type}
-                  onChange={(type) => switchRecognizer(type)}
-                  disabled={isRecording}
-                />
-              </View>
+              {Platform.OS === 'ios' && (
+                <View className="flex-1">
+                  <RecognizerToggle
+                    value={recognizer.type}
+                    onChange={(type) => switchRecognizer(type)}
+                    disabled={isRecording}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Cue banner */}

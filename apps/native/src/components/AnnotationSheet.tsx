@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
@@ -72,9 +73,9 @@ export function AnnotationSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1 justify-end"
+        style={styles.container}
       >
-      <Pressable className="flex-1 bg-black/60" onPress={onClose} />
+      <Pressable style={styles.backdrop} onPress={onClose} />
 
       <View className="bg-app-dark rounded-t-2xl border-t border-[#3d2430]">
         {/* Handle */}
@@ -210,3 +211,14 @@ export function AnnotationSheet({
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+});

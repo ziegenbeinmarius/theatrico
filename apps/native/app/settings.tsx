@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -150,24 +150,26 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Recognizer preference */}
-        <View className="gap-2">
-          <SectionHeader label="SPEECH RECOGNIZER" />
-          <View className="gap-3 p-4 bg-app-card rounded-2xl">
-            <Text className="text-app-label text-[13px]">Preferred engine</Text>
-            <SegmentedControl<RecognizerPreference>
-              options={[
-                { value: 'native', label: 'Native (iOS)' },
-                { value: 'whisper', label: 'Whisper' },
-              ]}
-              value={settings.recognizerPreference}
-              onChange={handleRecognizerChange}
-            />
-            <Text className="text-app-tertiary text-[12px]">
-              Native uses Apple SFSpeechRecognizer (requires internet). Whisper runs on-device.
-            </Text>
+        {/* Recognizer preference — iOS only (native SFSpeechRecognizer is not available on Android) */}
+        {Platform.OS === 'ios' && (
+          <View className="gap-2">
+            <SectionHeader label="SPEECH RECOGNIZER" />
+            <View className="gap-3 p-4 bg-app-card rounded-2xl">
+              <Text className="text-app-label text-[13px]">Preferred engine</Text>
+              <SegmentedControl<RecognizerPreference>
+                options={[
+                  { value: 'native', label: 'Native (iOS)' },
+                  { value: 'whisper', label: 'Whisper' },
+                ]}
+                value={settings.recognizerPreference}
+                onChange={handleRecognizerChange}
+              />
+              <Text className="text-app-tertiary text-[12px]">
+                Native uses Apple SFSpeechRecognizer (requires internet). Whisper runs on-device.
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Whisper model size */}
         <View className="gap-2">
