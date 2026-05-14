@@ -40,6 +40,18 @@ func (h *Hub) ClientCount(sessionID string) int {
 	return len(h.clients[sessionID])
 }
 
+// CloseSession disconnects all clients connected to the given session.
+func (h *Hub) CloseSession(sessionID string) {
+	h.mu.Lock()
+	clients := h.clients[sessionID]
+	delete(h.clients, sessionID)
+	h.mu.Unlock()
+
+	for c := range clients {
+		c.conn.Close()
+	}
+}
+
 func (h *Hub) Broadcast(sessionID string, msg []byte) {
 	h.mu.RLock()
 	targets := make([]*Client, 0, len(h.clients[sessionID]))

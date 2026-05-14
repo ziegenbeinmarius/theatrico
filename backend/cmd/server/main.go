@@ -247,11 +247,14 @@ func main() {
 		}
 	}))
 	mux.HandleFunc("/api/sessions", srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		switch r.Method {
+		case http.MethodGet:
+			srv.handleListSessions(w, r)
+		case http.MethodPost:
+			srv.handleCreateSession(w, r)
+		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
 		}
-		srv.handleCreateSession(w, r)
 	}))
 	mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
@@ -281,6 +284,11 @@ func main() {
 			}
 		} else if r.Method == http.MethodGet {
 			srv.handleGetSession(w, r, code)
+			return
+		} else if r.Method == http.MethodDelete {
+			srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+				srv.handleDeleteSession(w, r, code)
+			})(w, r)
 			return
 		}
 		http.Error(w, "not found", http.StatusNotFound)
@@ -759,6 +767,36 @@ func (s *server) handleDeleteAnnotation(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	sessions := s.sessions.List()
+	items := make([]api.SessionListItem, 0, len(sessions))
+	for _, sess := range sessions {
+		title := ""
+		if entry, ok := s.scripts.Get(sess.ScriptID); ok {
+			title = entry.Title
+		}
+		items = append(items, api.SessionListItem{
+			JoinCode:    sess.JoinCode,
+			ScriptID:    sess.ScriptID,
+			ScriptTitle: title,
+			Cursor:      sess.Cursor(),
+			Paused:      sess.Paused(),
+			CreatedAt:   sess.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items) //nolint:errcheck
+}
+
+func (s *server) handleDeleteSession(w http.ResponseWriter, r *http.Request, code string) {
+	if !s.sessions.Delete(code) {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	s.hub.CloseSession(code)
 	w.WriteHeader(http.StatusNoContent)
 }
 

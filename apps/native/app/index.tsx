@@ -1,6 +1,7 @@
-import { useReducer } from 'react';
+import { useEffect, useReducer } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   Text,
@@ -8,7 +9,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/AuthContext';
 import { usePlays } from '@/hooks/usePlays';
+import { useSessions, useDeleteSession } from '@/hooks/useSessions';
 import { theatricoClient } from '@/services/api/theatricoClient';
 import type { Play } from '@/domain';
 
@@ -45,11 +48,20 @@ function useCreateSession(onSuccess: (code: string) => void) {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { token, loading: authLoading } = useAuth();
   const { data: plays, isLoading: playsLoading, error: playsError } = usePlays();
   const { creating, error: createError, create } = useCreateSession(
     (code) => router.push({ pathname: '/operator', params: { code } }),
   );
   const [selectedPlayId, setSelectedPlayId] = useReducer((_: string | null, v: string | null) => v, null);
+  const { data: sessions, isLoading: sessionsLoading } = useSessions();
+  const { mutate: deleteSession } = useDeleteSession();
+
+  useEffect(() => {
+    if (!authLoading && !token) {
+      router.replace('/operator/login');
+    }
+  }, [authLoading, token, router]);
 
   const selectedPlay = plays?.find((p) => p.id === selectedPlayId) ?? null;
 
@@ -135,6 +147,40 @@ export default function HomeScreen() {
             <Text className="text-white text-[15px] font-bold">Create Session →</Text>
           )}
         </Pressable>
+
+        {/* Active sessions */}
+        {sessionsLoading ? null : sessions && sessions.length > 0 ? (
+          <View className="gap-1.5">
+            <Text className="text-[12px] font-bold text-app-label uppercase tracking-[1px] mt-1">
+              Active Sessions
+            </Text>
+            {sessions.map((s) => (
+              <Pressable
+                key={s.join_code}
+                className="flex-row items-center rounded-[10px] bg-app-input px-3 py-2.5 gap-2"
+                onPress={() => router.push({ pathname: '/operator', params: { code: s.join_code } })}
+              >
+                <View className="flex-1">
+                  <Text className="text-[14px] font-semibold text-app-text" numberOfLines={1}>
+                    {s.script_title || s.script_id}
+                  </Text>
+                  <Text className="text-[12px] text-app-muted tracking-[2px]">{s.join_code}</Text>
+                </View>
+                <Pressable
+                  hitSlop={8}
+                  onPress={() =>
+                    Alert.alert('Delete Session', `Remove session ${s.join_code}?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: () => deleteSession(s.join_code) },
+                    ])
+                  }
+                >
+                  <Text className="text-app-accent text-[18px] font-bold">✕</Text>
+                </Pressable>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       {/* Audience section */}

@@ -107,6 +107,20 @@ func (s *SQLiteStore) Get(code string) (*Session, bool) {
 	return s.inner.Get(code)
 }
 
+func (s *SQLiteStore) List() []*Session {
+	return s.inner.List()
+}
+
+func (s *SQLiteStore) Delete(code string) bool {
+	if !s.inner.Delete(code) {
+		return false
+	}
+	if _, err := s.db.Exec(`DELETE FROM sessions WHERE join_code = ?`, code); err != nil {
+		log.Printf("warning: delete session %s from db: %v", code, err)
+	}
+	return true
+}
+
 // Persist writes the current cursor and paused state of sess to SQLite.
 func (s *SQLiteStore) Persist(sess *Session) {
 	sess.mu.Lock()

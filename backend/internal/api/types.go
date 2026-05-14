@@ -94,3 +94,13 @@ type UpdateAnnotationRequest struct {
 	Type    string `json:"type"`
 	Content string `json:"content"`
 }
+
+// SessionListItem is returned by GET /api/sessions.
+type SessionListItem struct {
+	JoinCode    string `json:"join_code"`
+	ScriptID    string `json:"script_id"`
+	ScriptTitle string `json:"script_title"`
+	Cursor      int    `json:"cursor"`
+	Paused      bool   `json:"paused"`
+	CreatedAt   string `json:"created_at"`
+}

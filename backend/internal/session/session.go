@@ -59,6 +59,8 @@ func (s *Session) SetPaused(p bool) {
 type Repository interface {
 	Create(scriptID, language string, scr *script.Script, flatLines []script.FlatLine) (*Session, error)
 	Get(code string) (*Session, bool)
+	List() []*Session
+	Delete(code string) bool
 }
 
 // MemoryStore is an in-memory implementation of Repository.
@@ -117,4 +119,24 @@ func (s *MemoryStore) Get(code string) (*Session, bool) {
 	defer s.mu.RUnlock()
 	sess, ok := s.byCode[code]
 	return sess, ok
+}
+
+func (s *MemoryStore) List() []*Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Session, 0, len(s.byCode))
+	for _, sess := range s.byCode {
+		out = append(out, sess)
+	}
+	return out
+}
+
+func (s *MemoryStore) Delete(code string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.byCode[code]; !ok {
+		return false
+	}
+	delete(s.byCode, code)
+	return true
 }

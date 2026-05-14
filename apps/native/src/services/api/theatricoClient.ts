@@ -13,6 +13,15 @@ import {
   type SessionStatus,
 } from '@theatrico/shared';
 
+interface SessionSummary {
+  join_code: string;
+  script_id: string;
+  script_title: string;
+  cursor: number;
+  paused: boolean;
+  created_at: string;
+}
+
 class TheatricoClient implements ITheatricoClient {
   private token: string | null = null;
 
@@ -159,6 +168,21 @@ class TheatricoClient implements ITheatricoClient {
       throw new Error(msg || `Delete failed: ${res.status}`);
     }
   }
+
+  listSessions(): Promise<SessionSummary[]> {
+    return this.request<SessionSummary[]>('/api/sessions');
+  }
+
+  async deleteSession(code: string): Promise<void> {
+    const res = await fetch(`${config.backendUrl}/api/sessions/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    });
+    if (!res.ok && res.status !== 204) {
+      throw new Error(`Delete session failed: ${res.status}`);
+    }
+  }
 }
 
 export const theatricoClient = new TheatricoClient();
+export type { SessionSummary };
