@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TOKEN_KEY = 'theatrico_operator_token';
 
@@ -28,7 +28,7 @@ export function AuthProvider({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    SecureStore.getItemAsync(TOKEN_KEY)
+    AsyncStorage.getItem(TOKEN_KEY)
       .then((t) => setToken(t))
       .finally(() => setLoading(false));
   }, []);
@@ -44,7 +44,7 @@ export function AuthProvider({
         throw new Error('Invalid username or password');
       }
       const { token: t } = await res.json();
-      await SecureStore.setItemAsync(TOKEN_KEY, t);
+      await AsyncStorage.setItem(TOKEN_KEY, t);
       setToken(t);
     },
     [backendUrl]
@@ -57,7 +57,7 @@ export function AuthProvider({
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => {});
     }
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await AsyncStorage.removeItem(TOKEN_KEY);
     setToken(null);
   }, [backendUrl, token]);
 
