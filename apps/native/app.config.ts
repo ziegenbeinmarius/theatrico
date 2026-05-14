@@ -24,6 +24,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         'Theatrico uses speech recognition to follow along with dialogue and advance the script automatically.',
     },
   },
+  android: {
+    package: 'com.theatrico.native',
+  },
   web: {
     bundler: 'metro',
     output: 'static',

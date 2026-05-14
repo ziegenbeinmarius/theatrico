@@ -2,19 +2,11 @@ import { ActivityIndicator, Alert, Pressable, Text, View, useWindowDimensions } 
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
-import type { Annotation } from '@theatrico/shared';
 import { useOperatorSession, type WsStatus } from '@/hooks/useOperatorSession';
-import {
-  useAnnotationsQuery,
-  useCreateAnnotation,
-  useUpdateAnnotation,
-  useDeleteAnnotation,
-  buildAnnotationMap,
-} from '@/hooks/useAnnotations';
+import { useAnnotationsQuery, buildAnnotationMap } from '@/hooks/useAnnotations';
 import { RecognizerToggle } from '@/components/RecognizerToggle';
 import { TranscriptLog } from '@/components/TranscriptLog';
 import { ScriptPositionCard } from '@/components/ScriptPositionCard';
-import { AnnotationSheet } from '@/components/AnnotationSheet';
 import { CueBanner } from '@/components/CueBanner';
 import { ModelDownloadSheet } from '@/components/ModelDownloadSheet';
 import { useSpeechRecognizerContext } from '@/context/SpeechRecognizerContext';
@@ -89,12 +81,6 @@ function useWhisperModelCheck(modelSize: string) {
   return needsDownload;
 }
 
-interface AnnotationTarget {
-  seqIdx: number;
-  lineLabel: string;
-  annotations: Annotation[];
-}
-
 export default function OperatorScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -128,44 +114,9 @@ export default function OperatorScreen() {
   const isPaused = session?.status === 'paused';
   const scriptId = session?.scriptId ?? '';
 
-  // Annotations
+  // Annotations — display only, editing is via Script Library
   const annotationsQuery = useAnnotationsQuery(scriptId || undefined);
   const annotationMap = buildAnnotationMap(annotationsQuery.data);
-  const createAnnotation = useCreateAnnotation(scriptId);
-  const updateAnnotation = useUpdateAnnotation(scriptId);
-  const deleteAnnotation = useDeleteAnnotation(scriptId);
-
-  const [annotationTarget, setAnnotationTarget] = useState<AnnotationTarget | null>(null);
-
-  function handleAnnotationPress(seqIdx: number, annotations: Annotation[]) {
-    if (!play) return;
-    const lines = play.acts.flatMap((a) => a.scenes.flatMap((s) => s.lines));
-    const line = lines[seqIdx];
-    const charPart = line?.character ? `${line.character} · ` : '';
-    const text = line?.text ?? '';
-    const lineLabel = `${charPart}${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`;
-    setAnnotationTarget({ seqIdx, lineLabel, annotations });
-  }
-
-  function handleAnnotationSave(type: string, content: string) {
-    if (!annotationTarget) return;
-    const existing = annotationTarget.annotations[0] ?? null;
-    if (existing) {
-      updateAnnotation.mutate(
-        { id: existing.id, type, content },
-        { onSuccess: () => setAnnotationTarget(null) },
-      );
-    } else {
-      createAnnotation.mutate(
-        { lineIndex: annotationTarget.seqIdx, type, content },
-        { onSuccess: () => setAnnotationTarget(null) },
-      );
-    }
-  }
-
-  function handleAnnotationDelete(id: number) {
-    deleteAnnotation.mutate(id, { onSuccess: () => setAnnotationTarget(null) });
-  }
 
   const [showDownloadSheet, setShowDownloadSheet] = useState(false);
   const whisperNeedsDownload = useWhisperModelCheck(settings.whisperModelSize);
@@ -211,20 +162,6 @@ export default function OperatorScreen() {
     } catch {}
   };
 
-  const annotationSheetContent = annotationTarget ? (
-    <AnnotationSheet
-      visible
-      annotation={annotationTarget.annotations[0] ?? null}
-      lineLabel={annotationTarget.lineLabel}
-      onSave={(t, c) => handleAnnotationSave(t, c)}
-      onDelete={annotationTarget.annotations[0] ? handleAnnotationDelete : undefined}
-      onClose={() => setAnnotationTarget(null)}
-      isPending={
-        createAnnotation.isPending || updateAnnotation.isPending || deleteAnnotation.isPending
-      }
-    />
-  ) : null;
-
   // iPad: side-by-side — script on left (wide), controls + transcript on right (narrow)
   if (isIPad) {
     return (
@@ -260,7 +197,6 @@ export default function OperatorScreen() {
               position={currentPosition}
               lookahead={12}
               annotationMap={scriptId ? annotationMap : undefined}
-              onAnnotationPress={scriptId ? handleAnnotationPress : undefined}
             />
           </View>
 
@@ -321,7 +257,6 @@ export default function OperatorScreen() {
           onDismiss={() => setShowDownloadSheet(false)}
           onDownloadComplete={() => setShowDownloadSheet(false)}
         />
-        {annotationSheetContent}
       </>
     );
   }
@@ -392,7 +327,6 @@ export default function OperatorScreen() {
                 position={currentPosition}
                 lookahead={8}
                 annotationMap={scriptId ? annotationMap : undefined}
-                onAnnotationPress={scriptId ? handleAnnotationPress : undefined}
               />
             </View>
 
@@ -449,7 +383,6 @@ export default function OperatorScreen() {
         onDismiss={() => setShowDownloadSheet(false)}
         onDownloadComplete={() => setShowDownloadSheet(false)}
       />
-      {annotationSheetContent}
     </>
   );
 }

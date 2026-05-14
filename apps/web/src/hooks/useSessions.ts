@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createSession, deleteScript, getScript, getScripts, getSession, uploadScript } from '../lib/api';
+import { createSession, deleteScript, deleteSession, getScript, getScripts, getSession, listSessions, uploadScript } from '../lib/api';
 
 export const sessionKeys = {
   all: ['sessions'] as const,
@@ -10,6 +10,22 @@ export const scriptKeys = {
   all: ['scripts'] as const,
   detail: (id: string) => ['scripts', id] as const,
 };
+
+export function useSessionsQuery() {
+  return useQuery({
+    queryKey: sessionKeys.all,
+    queryFn: listSessions,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDeleteSessionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => deleteSession(code),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKeys.all }),
+  });
+}
 
 export function useSessionQuery(code: string | undefined) {
   return useQuery({

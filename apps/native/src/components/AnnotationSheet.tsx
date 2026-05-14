@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -68,6 +70,10 @@ export function AnnotationSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1 justify-end"
+      >
       <Pressable className="flex-1 bg-black/60" onPress={onClose} />
 
       <View className="bg-app-dark rounded-t-2xl border-t border-[#3d2430]">
@@ -200,6 +206,7 @@ export function AnnotationSheet({
           </View>
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

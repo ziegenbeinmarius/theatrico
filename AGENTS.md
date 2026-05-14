@@ -9,6 +9,15 @@ When a change is ready, submit the branch for review with a pull request or equi
 
 This file tracks implementation conventions and architecture decisions for coding agents working on Theatrico.
 
+## Cross-Platform Parity Rule
+
+Theatrico has two client implementations: `apps/web/` (React PWA) and `apps/native/` (React Native / Expo, iOS only). **Any feature change, bug fix, or UI behaviour update must be applied to both clients unless there is a clear platform-specific reason not to.** If a change only makes sense in one client, ask the user before proceeding.
+
+Known intentional differences (do not replicate these to the other platform):
+- **Audience / join flow**: native has no audience view (audience joins via the web client only).
+- **Android build config**: native targets iOS only; there is no Android target.
+- **Speech recognition UI**: native uses `RecognizerToggle` with on-device Whisper option; web uses browser `MediaRecorder` + server-side Whisper over WebSocket.
+
 ## Product Shape
 
 Theatrico is a theater companion app. An operator starts a live session, audience members join by QR code or join code, and the audience PWA follows the current script position. Future work will add microphone capture, Whisper API transcription, script matching, and websocket position broadcasts.

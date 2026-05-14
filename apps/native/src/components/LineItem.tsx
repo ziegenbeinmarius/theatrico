@@ -12,32 +12,64 @@ interface Props {
   onAnnotationPress?: (seqIdx: number, annotations: Annotation[]) => void;
 }
 
-function AnnotationBadge({
-  annotations,
-  seqIdx,
+const CUE_ICON: Record<string, string> = {
+  lighting: '💡',
+  sound: '🔊',
+  stage_direction: '🎭',
+  custom: '⚡',
+};
+
+function parseCue(raw: string): { cue_type: string; description: string } {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { cue_type: 'custom', description: raw };
+  }
+}
+
+export function AnnotationRow({
+  annotation,
   onPress,
 }: {
-  annotations: Annotation[];
-  seqIdx: number;
-  onPress: (seqIdx: number, annotations: Annotation[]) => void;
+  annotation: Annotation;
+  onPress?: () => void;
 }) {
-  const hasCue = annotations.some((a) => a.type === 'cue');
-  return (
-    <Pressable
-      onPress={() => onPress(seqIdx, annotations)}
-      hitSlop={8}
-      className={`self-start flex-row items-center gap-0.5 px-1.5 py-0.5 rounded mt-0.5 ${
-        hasCue ? 'bg-[#3a2800]' : 'bg-[#1a1030]'
-      }`}
-    >
-      <Text className="text-[10px]">{hasCue ? '⚡' : '📝'}</Text>
-      <Text
-        className={`text-[10px] font-bold ${hasCue ? 'text-[#f5c842]' : 'text-[#9fb4ff]'}`}
-      >
-        {annotations.length}
+  const isCue = annotation.type === 'cue';
+  let icon: string;
+  let label: string;
+  let textClass: string;
+  let bgClass: string;
+
+  if (isCue) {
+    const cue = parseCue(annotation.content);
+    icon = CUE_ICON[cue.cue_type] ?? '⚡';
+    label = `${cue.cue_type.replace(/_/g, ' ')} · ${cue.description}`;
+    textClass = 'text-[#f5c842]';
+    bgClass = 'bg-[#2a1f00]';
+  } else {
+    icon = '📝';
+    label = annotation.content;
+    textClass = 'text-[#9fb4ff]';
+    bgClass = 'bg-[#0d1530]';
+  }
+
+  const inner = (
+    <View className={`flex-row items-start gap-1.5 px-2 py-1 rounded-md ${bgClass}`}>
+      <Text className="text-[11px] mt-px">{icon}</Text>
+      <Text className={`flex-1 text-[11px] leading-[16px] ${textClass}`} numberOfLines={4}>
+        {label}
       </Text>
-    </Pressable>
+    </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable onPress={onPress} hitSlop={4}>
+        {inner}
+      </Pressable>
+    );
+  }
+  return inner;
 }
 
 export function LineItem({ item, onAnnotationPress }: Props) {
@@ -66,13 +98,28 @@ export function LineItem({ item, onAnnotationPress }: Props) {
   if (line.type === 'stage_direction' || line.type === 'action') {
     return (
       <View className={`px-4 py-2 mx-2 rounded-lg ${isActive ? 'bg-app-card' : ''}`}>
-        <Text
-          className={`text-sm italic leading-[20px] ${isActive ? 'text-app-text' : 'text-app-subtle'}`}
-        >
+        <Text className={`text-sm italic leading-[20px] ${isActive ? 'text-app-text' : 'text-app-subtle'}`}>
           {line.text}
         </Text>
-        {hasAnnotations && onAnnotationPress && (
-          <AnnotationBadge annotations={annotations} seqIdx={seqIdx} onPress={onAnnotationPress} />
+        {hasAnnotations && (
+          <View className="mt-1 gap-0.5">
+            {annotations.map((a) => (
+              <AnnotationRow
+                key={a.id}
+                annotation={a}
+                onPress={onAnnotationPress ? () => onAnnotationPress(seqIdx, annotations) : undefined}
+              />
+            ))}
+          </View>
+        )}
+        {!hasAnnotations && onAnnotationPress && (
+          <Pressable
+            onPress={() => onAnnotationPress(seqIdx, [])}
+            hitSlop={8}
+            className="self-start px-1.5 py-0.5 rounded mt-0.5 bg-app-card border border-[#3d2430]"
+          >
+            <Text className="text-[10px] text-app-subtle">+ Add annotation</Text>
+          </Pressable>
         )}
       </View>
     );
@@ -96,8 +143,16 @@ export function LineItem({ item, onAnnotationPress }: Props) {
       >
         {line.text}
       </Text>
-      {hasAnnotations && onAnnotationPress && (
-        <AnnotationBadge annotations={annotations} seqIdx={seqIdx} onPress={onAnnotationPress} />
+      {hasAnnotations && (
+        <View className="mt-1 gap-0.5">
+          {annotations.map((a) => (
+            <AnnotationRow
+              key={a.id}
+              annotation={a}
+              onPress={onAnnotationPress ? () => onAnnotationPress(seqIdx, annotations) : undefined}
+            />
+          ))}
+        </View>
       )}
       {!hasAnnotations && onAnnotationPress && (
         <Pressable

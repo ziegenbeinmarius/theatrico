@@ -1,5 +1,5 @@
 import type { Annotation } from '@theatrico/shared';
-import { CreateSessionResponse, PlayDetail, PlayInfo, SessionInfo } from '../types';
+import { CreateSessionResponse, PlayDetail, PlayInfo, SessionInfo, SessionSummary } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -18,8 +18,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export function listSessions() {
+  return request<SessionSummary[]>('/api/sessions');
+}
+
 export function getSession(code: string) {
   return request<SessionInfo>(`/api/sessions/${code.toUpperCase()}`);
+}
+
+export async function deleteSession(code: string) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  if (!response.ok && response.status !== 204) {
+    const message = (await response.text()).trim();
+    throw new Error(message || `Delete failed with ${response.status}`);
+  }
 }
 
 export function getScripts() {

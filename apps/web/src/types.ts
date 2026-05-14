@@ -9,6 +9,15 @@ export type {
   RawPlayDetail as PlayDetail,
 } from '@theatrico/shared';
 
+export interface SessionSummary {
+  join_code: string;
+  script_id: string;
+  script_title: string;
+  cursor: number;
+  paused: boolean;
+  created_at: string;
+}
+
 // Web-specific WebSocket message shapes (backend wire format for the web WS endpoint)
 export interface CueInfo {
   id: number;

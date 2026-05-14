@@ -173,6 +173,7 @@ export function ScriptEditorPage() {
           onLineClick={handleLineClick}
           annotationMap={annotationMap}
           onAnnotationClick={handleAnnotationClick}
+          showAnnotationsSplit
         />
       )}
 
