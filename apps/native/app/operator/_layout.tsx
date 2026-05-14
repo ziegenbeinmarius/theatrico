@@ -14,16 +14,19 @@ export default function OperatorLayout() {
   }
 
   if (!token) {
-    return <Redirect href="/operator/login" />;
+    return <Redirect href="/login" />;
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: '#130f12' },
-        headerTintColor: '#ffffff',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    />
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: '#130f12' },
+          headerTintColor: '#ffffff',
+          headerTitleStyle: { fontWeight: 'bold' },
+        }}
+      />
+    </>
   );
 }

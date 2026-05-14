@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as DocumentPicker from 'expo-document-picker';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const FileSystem = require('expo-file-system/legacy') as {
   readAsStringAsync: (uri: string) => Promise<string>;
@@ -29,7 +28,33 @@ type PickAction =
   | { type: 'set_title'; title: string }
   | { type: 'reset' };
 
+type DocumentPickerAsset = {
+  uri: string;
+  name: string;
+};
+
+type DocumentPickerResult =
+  | { canceled: true; assets?: undefined }
+  | { canceled: false; assets: DocumentPickerAsset[] };
+
+type DocumentPickerModule = {
+  getDocumentAsync: (options: {
+    type?: string[];
+    copyToCacheDirectory?: boolean;
+  }) => Promise<DocumentPickerResult>;
+};
+
 const pickInitial: PickState = { uri: null, name: '', title: '', preview: '' };
+
+function getDocumentPickerModule(): DocumentPickerModule | null {
+  try {
+    // Some native builds may not include this module yet. Lazy-load it so the route still mounts.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-document-picker') as DocumentPickerModule;
+  } catch {
+    return null;
+  }
+}
 
 function pickReducer(state: PickState, action: PickAction): PickState {
   switch (action.type) {
@@ -53,8 +78,17 @@ function ScriptUploadSheet({
   const upload = useUploadScript();
 
   async function pickFile() {
+    const documentPicker = getDocumentPickerModule();
+    if (!documentPicker) {
+      Alert.alert(
+        'Document picker unavailable',
+        'This native build does not include expo-document-picker yet. Rebuild or reinstall the app, then try again.',
+      );
+      return;
+    }
+
     try {
-      const result = await DocumentPicker.getDocumentAsync({
+      const result = await documentPicker.getDocumentAsync({
         type: ['text/markdown', 'text/plain'],
         copyToCacheDirectory: true,
       });

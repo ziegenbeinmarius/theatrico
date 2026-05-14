@@ -5,10 +5,11 @@ export const sessionKeys = {
   all: ['sessions'] as const,
 };
 
-export function useSessions() {
+export function useSessions({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery<SessionSummary[], Error>({
     queryKey: sessionKeys.all,
     queryFn: () => theatricoClient.listSessions(),
+    enabled,
   });
 }
 

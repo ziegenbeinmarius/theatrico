@@ -103,9 +103,9 @@ export function LineItem({ item, onAnnotationPress }: Props) {
         <Pressable
           onPress={() => onAnnotationPress(seqIdx, [])}
           hitSlop={8}
-          className="self-start px-1.5 py-0.5 rounded mt-0.5 bg-transparent"
+          className="self-start px-1.5 py-0.5 rounded mt-0.5 bg-app-card border border-[#3d2430]"
         >
-          <Text className="text-[10px] text-app-subtle opacity-0">+</Text>
+          <Text className="text-[10px] text-app-subtle">+ Add annotation</Text>
         </Pressable>
       )}
     </View>

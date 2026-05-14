@@ -49,6 +49,13 @@ func Open(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// SQLite with journal_mode=delete does not support concurrent writers;
+	// a single connection avoids SQLITE_BUSY errors from the default pool.
+	conn.SetMaxOpenConns(1)
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
 	if _, err := conn.Exec(schema); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)

@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { usePlays } from '@/hooks/usePlays';
@@ -49,29 +49,39 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { token, loading: authLoading } = useAuth();
-  const { data: plays, isLoading: playsLoading, error: playsError } = usePlays();
+  const { data: plays, isLoading: playsLoading, error: playsError } = usePlays({ enabled: !!token });
   const { creating, error: createError, create } = useCreateSession(
     (code) => router.push({ pathname: '/operator', params: { code } }),
   );
   const [selectedPlayId, setSelectedPlayId] = useReducer((_: string | null, v: string | null) => v, null);
-  const { data: sessions, isLoading: sessionsLoading } = useSessions();
+  const { data: sessions, isLoading: sessionsLoading } = useSessions({ enabled: !!token });
   const { mutate: deleteSession } = useDeleteSession();
 
   useEffect(() => {
     if (!authLoading && !token) {
-      router.replace('/operator/login');
+      router.replace('/login');
     }
   }, [authLoading, token, router]);
+
+  if (authLoading || !token) {
+    return (
+      <View className="flex-1 bg-app-dark items-center justify-center">
+        <ActivityIndicator color="#b31e35" size="large" />
+      </View>
+    );
+  }
 
   const selectedPlay = plays?.find((p) => p.id === selectedPlayId) ?? null;
 
   return (
-    <ScrollView
-      className="flex-1 bg-app-dark"
-      contentContainerClassName="flex-grow px-5 gap-5"
-      contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
-      keyboardShouldPersistTaps="handled"
-    >
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScrollView
+        className="flex-1 bg-app-dark"
+        contentContainerClassName="flex-grow px-5 gap-5"
+        contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
       <Text className="text-[42px] font-bold text-app-text text-center tracking-[2px]">
         Theatrico
       </Text>
@@ -183,21 +193,7 @@ export default function HomeScreen() {
         ) : null}
       </View>
 
-      {/* Audience section */}
-      <View className="bg-app-card rounded-2xl p-[18px] gap-3">
-        <Text className="text-[13px] font-bold text-app-label uppercase tracking-[1px]">
-          Audience
-        </Text>
-        <Text className="text-[13px] text-app-tertiary -mt-1.5">
-          Enter a session code or scan the QR code from the operator screen
-        </Text>
-        <Pressable
-          className="bg-app-accent rounded-xl py-[14px] items-center"
-          onPress={() => router.push('/join')}
-        >
-          <Text className="text-white text-[15px] font-bold">Join as Audience →</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </>
   );
 }
