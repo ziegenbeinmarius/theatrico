@@ -1,9 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WHISPER_MODEL_URLS, type WhisperModelSize } from '@/context/SettingsContext';
+import {
+  WHISPER_MODEL_URLS,
+  WHISPER_VAD_MODEL,
+  type WhisperModelInfo,
+  type WhisperModelSize,
+} from '@/context/SettingsContext';
 
 type DownloadState = 'idle' | 'downloading' | 'done' | 'error';
+type DownloadTask = {
+  downloadAsync: () => Promise<unknown>;
+  pauseAsync?: () => Promise<void>;
+};
+type FileSystemModule = {
+  cacheDirectory: string;
+  getInfoAsync: (p: string) => Promise<{ exists: boolean }>;
+  createDownloadResumable: (
+    url: string,
+    dest: string,
+    opts: object,
+    cb: (p: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void,
+  ) => DownloadTask;
+};
 
 interface ModelDownloadSheetProps {
   visible: boolean;
@@ -43,52 +62,55 @@ function useModelDownload(
     setProgress(0);
     setErrorMessage(null);
 
-    const { url } = WHISPER_MODEL_URLS[modelSize];
-    const fileName = url.split('/').pop() ?? 'whisper-model.bin';
+    const assets: WhisperModelInfo[] = [WHISPER_MODEL_URLS[modelSize], WHISPER_VAD_MODEL];
 
     // Lazy require expo-file-system to stay compatible with web/jest
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const FileSystem = require('expo-file-system/legacy') as {
-      cacheDirectory: string;
-      getInfoAsync: (p: string) => Promise<{ exists: boolean }>;
-      createDownloadResumable: (
-        url: string,
-        dest: string,
-        opts: object,
-        cb: (p: { totalBytesWritten: number; totalBytesExpectedToWrite: number }) => void,
-      ) => { downloadAsync: () => Promise<unknown>; pauseAsync?: () => Promise<void> };
+    const FileSystem = require('expo-file-system/legacy') as FileSystemModule;
+
+    const downloadAsset = async (asset: WhisperModelInfo, index: number) => {
+      const fileName = asset.url.split('/').pop() ?? 'whisper-model.bin';
+      const dest = `${FileSystem.cacheDirectory}${fileName}`;
+      const baseProgress = index / assets.length;
+      const assetWeight = 1 / assets.length;
+
+      const info = await FileSystem.getInfoAsync(dest);
+      if (info.exists) {
+        setProgress(baseProgress + assetWeight);
+        return;
+      }
+
+      const task = FileSystem.createDownloadResumable(asset.url, dest, {}, (p) => {
+        if (cancelledRef.current) return;
+        if (p.totalBytesExpectedToWrite > 0) {
+          const assetProgress = p.totalBytesWritten / p.totalBytesExpectedToWrite;
+          setProgress(baseProgress + assetProgress * assetWeight);
+        }
+      });
+      taskRef.current = task;
+      await task.downloadAsync();
+      taskRef.current = null;
+      setProgress(baseProgress + assetWeight);
     };
 
-    const dest = `${FileSystem.cacheDirectory}${fileName}`;
-
-    const task = FileSystem.createDownloadResumable(url, dest, {}, (p) => {
-      if (cancelledRef.current) return;
-      if (p.totalBytesExpectedToWrite > 0) {
-        setProgress(p.totalBytesWritten / p.totalBytesExpectedToWrite);
-      }
-    });
-
-    taskRef.current = task;
-
-    FileSystem.getInfoAsync(dest)
-      .then((info) => {
-        if (info.exists) {
-          setProgress(1);
-          setState('done');
-          return;
+    void (async () => {
+      try {
+        for (let i = 0; i < assets.length; i += 1) {
+          if (cancelledRef.current) return;
+          const asset = assets[i];
+          if (asset) {
+            await downloadAsset(asset, i);
+          }
         }
-        return task.downloadAsync();
-      })
-      .then(() => {
         if (cancelledRef.current) return;
         setProgress(1);
         setState('done');
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (cancelledRef.current) return;
         setState('error');
         setErrorMessage(err instanceof Error ? err.message : 'Download failed');
-      });
+      }
+    })();
   };
 
   const cancel = () => {
@@ -158,9 +180,9 @@ export function ModelDownloadSheet({
         {/* Handle */}
         <View className="self-center w-10 h-1 bg-app-subtle rounded-full mb-5" />
 
-        <Text className="text-app-text text-lg font-bold mb-1">Download Whisper Model</Text>
+        <Text className="text-app-text text-lg font-bold mb-1">Download Whisper Assets</Text>
         <Text className="text-app-muted text-[13px] mb-5">
-          {`${modelSize.charAt(0).toUpperCase() + modelSize.slice(1)} model · ${modelInfo.sizeLabel} · ~${modelInfo.estimatedSeconds}s on Wi-Fi`}
+          {`${modelSize.charAt(0).toUpperCase() + modelSize.slice(1)} model + voice detection · ${modelInfo.sizeLabel} · ~${modelInfo.estimatedSeconds}s on Wi-Fi`}
         </Text>
 
         {/* Progress bar */}

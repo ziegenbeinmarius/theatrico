@@ -3,8 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { theatricoClient } from '@/services/api/theatricoClient';
 import { createSessionWebSocket } from '@/services/api/websocket/SessionWebSocket';
-import { createOperatorWebSocket, type OperatorWebSocket } from '@/services/api/websocket/OperatorWebSocket';
+import {
+  createOperatorWebSocket,
+  type OperatorWebSocket,
+} from '@/services/api/websocket/OperatorWebSocket';
 import { useSpeechRecognizerContext } from '@/context/SpeechRecognizerContext';
+import { useSettings } from '@/context/SettingsContext';
 import type {
   ISessionWebSocket,
   Play,
@@ -14,7 +18,7 @@ import type {
   WsCueInfo,
 } from '@/domain';
 import { flattenLines, findLineIndex } from '@/lib/scriptUtils';
-import { matchTranscriptToScript, buildContextHint } from '@/lib/scriptMatcher';
+import { matchTranscriptToScript } from '@/lib/scriptMatcher';
 
 export type WsStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -43,8 +47,43 @@ export interface UseOperatorSessionResult {
   moveNext: () => Promise<void>;
 }
 
+const MAX_MATCH_ADVANCE_LINES = 5;
+const WHISPER_CONTEXT_BEFORE_LINES = 4;
+const WHISPER_CONTEXT_AFTER_LINES = 5;
+const WHISPER_CONTEXT_MAX_CHARS = 1800;
+
+type FlatLines = ReturnType<typeof flattenLines>;
+
+function buildWhisperContextHint(lines: FlatLines, currentIdx: number): string {
+  if (lines.length === 0) return '';
+
+  const start = Math.max(0, currentIdx - WHISPER_CONTEXT_BEFORE_LINES);
+  const end = Math.min(lines.length - 1, currentIdx + WHISPER_CONTEXT_AFTER_LINES);
+
+  // Pass a vocabulary word list rather than full sentences. Whisper uses initial_prompt as
+  // a word/style hint — full sentences cause it to hallucinate script lines into transcriptions
+  // when audio is ambiguous.
+  const seen = new Set<string>();
+  const words: string[] = [];
+  for (const fl of lines.slice(start, end + 1)) {
+    for (const raw of fl.line.text.split(/\s+/)) {
+      const word = raw.replace(/[^\p{L}'’-]/gu, '');
+      const key = word.toLowerCase();
+      if (key.length >= 4 && !seen.has(key)) {
+        seen.add(key);
+        words.push(word);
+      }
+    }
+  }
+
+  if (words.length === 0) return '';
+  const hint = words.join(', ');
+  return hint.length > WHISPER_CONTEXT_MAX_CHARS ? hint.slice(0, WHISPER_CONTEXT_MAX_CHARS) : hint;
+}
+
 export function useOperatorSession(sessionCode: string): UseOperatorSessionResult {
   const { recognizer } = useSpeechRecognizerContext();
+  const { settings } = useSettings();
 
   const {
     data: session,
@@ -76,15 +115,60 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
   const sessionWsRef = useRef<ISessionWebSocket | null>(null);
   const operatorWsRef = useRef<OperatorWebSocket | null>(null);
   const transcriptCounterRef = useRef(0);
+  const lastAcceptedTranscriptRef = useRef<{ normalized: string; at: number }>({
+    normalized: '',
+    at: 0,
+  });
 
   // Refs so callbacks always see the latest values without stale closures
   const flatLinesRef = useRef<ReturnType<typeof flattenLines>>([]);
   const currentPositionRef = useRef<Position | null>(currentPosition);
 
-  useEffect(() => { currentPositionRef.current = currentPosition; }, [currentPosition]);
+  useEffect(() => {
+    currentPositionRef.current = currentPosition;
+  }, [currentPosition]);
   useEffect(() => {
     flatLinesRef.current = play ? flattenLines(play) : [];
   }, [play]);
+
+  const normalizeTranscript = useCallback((text: string) => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, []);
+
+  const isHallucinatedTranscript = useCallback(
+    (text: string) => {
+      const normalized = normalizeTranscript(text);
+      if (!normalized) return true;
+      // Common non-script hallucinations from mobile recognizers/whisper.
+      if (
+        normalized === 'end playback' ||
+        normalized === 'playback' ||
+        normalized === 'end of audio' ||
+        normalized === 'end audio' ||
+        normalized === 'silence' ||
+        normalized === 'silent' ||
+        normalized === 'noise' ||
+        normalized === 'music' ||
+        normalized === 'applause' ||
+        normalized === 'thank you for watching' ||
+        normalized === 'thanks for watching' ||
+        normalized.startsWith('subtitles by') ||
+        normalized.startsWith('captioned by')
+      ) {
+        return true;
+      }
+      const words = normalized.split(' ').filter(Boolean).length;
+      if (words <= 1 && normalized.length < 4) {
+        return true;
+      }
+      return false;
+    },
+    [normalizeTranscript],
+  );
 
   // Session + operator WebSocket connections
   useEffect(() => {
@@ -117,11 +201,14 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
           const lastItem = prev[prev.length - 1];
           const next = (() => {
             if (!msg.isFinal && lastItem && !lastItem.isFinal) {
-              return [...prev.slice(0, -1), { id, text: msg.text, isFinal: false, timestamp: Date.now() }];
+              return [
+                ...prev.slice(0, -1),
+                { id, text: msg.text, isFinal: false, timestamp: Date.now() },
+              ];
             }
             return [...prev, { id, text: msg.text, isFinal: msg.isFinal, timestamp: Date.now() }];
           })();
-          return next.length > 5 ? next.slice(-5) : next;
+          return next;
         });
       } else if (msg.type === 'error') {
         setWsStatus('disconnected');
@@ -155,24 +242,62 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
         const lastItem = prev[prev.length - 1];
         const next = (() => {
           if (!result.isFinal && lastItem && !lastItem.isFinal) {
-            return [...prev.slice(0, -1), { id, text: result.text, isFinal: false, timestamp: Date.now() }];
+            return [
+              ...prev.slice(0, -1),
+              { id, text: result.text, isFinal: false, timestamp: Date.now() },
+            ];
           }
-          return [...prev, { id, text: result.text, isFinal: result.isFinal, timestamp: Date.now() }];
+          return [
+            ...prev,
+            { id, text: result.text, isFinal: result.isFinal, timestamp: Date.now() },
+          ];
         })();
-        return next.length > 5 ? next.slice(-5) : next;
+        return next;
       });
 
-      // WhisperRecognizer keeps isFinal=false throughout the session (isCapturing stays true),
-      // so match on every result. Guard by matchIdx > currentIdx to only advance forward
+      if (isHallucinatedTranscript(result.text)) {
+        return;
+      }
+
+      // Match on every recognizer result. Guard by matchIdx > currentIdx to only advance forward
       // and skip re-firing on the same line during rolling interim updates.
       const lines = flatLinesRef.current;
       const currentIdx = currentPositionRef.current
         ? findLineIndex(lines, currentPositionRef.current.lineId)
         : -1;
-      const matchIdx = matchTranscriptToScript(result.text, lines, Math.max(0, currentIdx));
-      if (matchIdx >= 0 && matchIdx > currentIdx) {
+
+      const normalized = normalizeTranscript(result.text);
+      const now = Date.now();
+      if (
+        normalized === lastAcceptedTranscriptRef.current.normalized &&
+        now - lastAcceptedTranscriptRef.current.at < 1200
+      ) {
+        return;
+      }
+
+      const words = normalized.split(' ').filter(Boolean).length;
+      const shouldAttemptMatch = result.isFinal || words >= 4 || normalized.length >= 24;
+      if (!shouldAttemptMatch) {
+        return;
+      }
+
+      const threshold = result.isFinal ? 0.46 : 0.58;
+      const windowSize = result.isFinal ? 14 : 10;
+      const matchIdx = matchTranscriptToScript(
+        result.text,
+        lines,
+        Math.max(0, currentIdx),
+        windowSize,
+        threshold,
+      );
+      if (
+        matchIdx >= 0 &&
+        matchIdx > currentIdx &&
+        matchIdx - currentIdx <= MAX_MATCH_ADVANCE_LINES
+      ) {
         const matched = lines[matchIdx];
         if (matched) {
+          lastAcceptedTranscriptRef.current = { normalized, at: now };
           currentPositionRef.current = matched.position; // update immediately to block duplicate fires
           setCurrentPosition(matched.position);
           operatorWsRef.current?.forcePosition(matchIdx);
@@ -180,7 +305,7 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
       }
     });
     return unsub;
-  }, [recognizer]);
+  }, [isHallucinatedTranscript, normalizeTranscript, recognizer]);
 
   const startRecording = useCallback(async () => {
     const { granted } = await requestRecordingPermissionsAsync();
@@ -192,11 +317,11 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
     const currentIdx = currentPositionRef.current
       ? findLineIndex(lines, currentPositionRef.current.lineId)
       : 0;
-    const contextHint = buildContextHint(lines, currentIdx, 4);
+    const contextHint = buildWhisperContextHint(lines, Math.max(0, currentIdx));
 
-    await recognizer.start({ language: 'en', contextHint });
+    await recognizer.start({ language: settings.language, contextHint });
     setIsRecording(true);
-  }, [recognizer]);
+  }, [recognizer, settings.language]);
 
   const stopRecording = useCallback(async () => {
     setIsRecording(false);

@@ -1,9 +1,21 @@
 import Constants from 'expo-constants';
 
-export function resolveDefaultBackendUrl(): string {
+function configuredBackendUrl(): string | null {
   const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
   const envUrl = extra?.['BACKEND_URL'];
   if (typeof envUrl === 'string' && envUrl.length > 0) {
+    return envUrl;
+  }
+  return null;
+}
+
+export function hasConfiguredBackendUrl(): boolean {
+  return configuredBackendUrl() !== null;
+}
+
+export function resolveDefaultBackendUrl(): string {
+  const envUrl = configuredBackendUrl();
+  if (envUrl) {
     return envUrl;
   }
   if (__DEV__) {

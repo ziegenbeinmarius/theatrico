@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ISpeechRecognizer } from '@/services/speech/ISpeechRecognizer';
 import { createSpeechRecognizer } from '@/services/speech/SpeechRecognizerFactory';
-import { useSettings, WHISPER_MODEL_URLS } from '@/context/SettingsContext';
+import { useSettings, WHISPER_MODEL_URLS, WHISPER_VAD_MODEL } from '@/context/SettingsContext';
 
 interface SpeechRecognizerContextValue {
   recognizer: ISpeechRecognizer;
@@ -17,6 +17,7 @@ function buildRecognizer(
   if (preference === 'whisper') {
     return createSpeechRecognizer('whisper', {
       modelUrl: WHISPER_MODEL_URLS[modelSize].url,
+      vadModelUrl: WHISPER_VAD_MODEL.url,
     });
   }
   return createSpeechRecognizer('native');

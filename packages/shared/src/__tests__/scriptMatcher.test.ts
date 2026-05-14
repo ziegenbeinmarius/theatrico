@@ -70,6 +70,26 @@ describe('matchTranscriptToScript', () => {
     expect(idx).toBe(3);
   });
 
+  it("matches when transcript has extra words before the true line", () => {
+    const idx = matchTranscriptToScript(
+      "green eyes i already trust this cat",
+      [
+        ...lines,
+        {
+          ...lines[0],
+          line: {
+            ...lines[0].line,
+            text: "i already trust this cat",
+          },
+        },
+      ],
+      0,
+      15,
+      0.35,
+    );
+    expect(idx).toBe(6);
+  });
+
   it('returns -1 when no line exceeds the threshold', () => {
     const idx = matchTranscriptToScript('completely unrelated gibberish xyz', lines, 0);
     expect(idx).toBe(-1);

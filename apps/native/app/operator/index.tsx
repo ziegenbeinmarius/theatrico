@@ -1,4 +1,12 @@
-import { ActivityIndicator, Alert, Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
@@ -10,7 +18,7 @@ import { ScriptPositionCard } from '@/components/ScriptPositionCard';
 import { CueBanner } from '@/components/CueBanner';
 import { ModelDownloadSheet } from '@/components/ModelDownloadSheet';
 import { useSpeechRecognizerContext } from '@/context/SpeechRecognizerContext';
-import { useSettings, WHISPER_MODEL_URLS } from '@/context/SettingsContext';
+import { useSettings, WHISPER_MODEL_URLS, WHISPER_VAD_MODEL } from '@/context/SettingsContext';
 
 const IPAD_BREAKPOINT = 768;
 
@@ -66,15 +74,19 @@ function useWhisperModelCheck(modelSize: string) {
   useEffect(() => {
     const info = WHISPER_MODEL_URLS[modelSize as keyof typeof WHISPER_MODEL_URLS];
     if (!info) return;
-    const fileName = info.url.split('/').pop() ?? 'whisper-model.bin';
+    const assets = [info, WHISPER_VAD_MODEL];
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const FileSystem = require('expo-file-system/legacy') as {
       cacheDirectory: string;
       getInfoAsync: (p: string) => Promise<{ exists: boolean }>;
     };
-    const dest = `${FileSystem.cacheDirectory}${fileName}`;
-    FileSystem.getInfoAsync(dest)
-      .then((i) => setNeedsDownload(!i.exists))
+    Promise.all(
+      assets.map((asset) => {
+        const fileName = asset.url.split('/').pop() ?? 'whisper-model.bin';
+        return FileSystem.getInfoAsync(`${FileSystem.cacheDirectory}${fileName}`);
+      }),
+    )
+      .then((results) => setNeedsDownload(results.some((i) => !i.exists)))
       .catch(() => setNeedsDownload(false));
   }, [modelSize]);
 
@@ -186,12 +198,14 @@ export default function OperatorScreen() {
           {/* Left: full-height script */}
           <View className="flex-[3] gap-2">
             <View className="flex-row items-center gap-2.5 bg-app-card rounded-[10px] px-[14px] py-2">
-              <Text className="text-[10px] text-app-tertiary font-bold tracking-[1px]">SESSION</Text>
-              <Text className="text-lg text-app-text font-extrabold tracking-[4px]">{sessionCode}</Text>
+              <Text className="text-[10px] text-app-tertiary font-bold tracking-[1px]">
+                SESSION
+              </Text>
+              <Text className="text-lg text-app-text font-extrabold tracking-[4px]">
+                {sessionCode}
+              </Text>
             </View>
-            {activeCues.length > 0 && (
-              <CueBanner cues={activeCues} onDismiss={dismissCue} />
-            )}
+            {activeCues.length > 0 && <CueBanner cues={activeCues} onDismiss={dismissCue} />}
             <ScriptPositionCard
               play={play}
               position={currentPosition}
@@ -205,23 +219,33 @@ export default function OperatorScreen() {
             <StatusBanner
               wsStatus={wsStatus}
               apiError={error}
-              onRetry={() => router.replace({ pathname: '/operator', params: { code: sessionCode } })}
+              onRetry={() =>
+                router.replace({ pathname: '/operator', params: { code: sessionCode } })
+              }
             />
 
             {/* Cursor row */}
             <View className="flex-row gap-2">
-              <Pressable className="flex-1 bg-app-card rounded-[10px] py-3 items-center" onPress={handleMovePrev}>
+              <Pressable
+                className="flex-1 bg-app-card rounded-[10px] py-3 items-center"
+                onPress={handleMovePrev}
+              >
                 <Text className="text-sm font-semibold text-app-label">← Prev</Text>
               </Pressable>
               <Pressable
                 className={`flex-[1.4] rounded-[10px] py-3 items-center border ${isPaused ? 'bg-[#2a0f1a] border-app-accent' : 'bg-app-card border-transparent'}`}
                 onPress={handleTogglePause}
               >
-                <Text className={`text-sm font-bold ${isPaused ? 'text-app-accent' : 'text-app-label'}`}>
+                <Text
+                  className={`text-sm font-bold ${isPaused ? 'text-app-accent' : 'text-app-label'}`}
+                >
                   {isPaused ? '▶ Resume' : '⏸ Pause'}
                 </Text>
               </Pressable>
-              <Pressable className="flex-1 bg-app-card rounded-[10px] py-3 items-center" onPress={handleMoveNext}>
+              <Pressable
+                className="flex-1 bg-app-card rounded-[10px] py-3 items-center"
+                onPress={handleMoveNext}
+              >
                 <Text className="text-sm font-semibold text-app-label">Next →</Text>
               </Pressable>
             </View>
@@ -299,14 +323,20 @@ export default function OperatorScreen() {
             <StatusBanner
               wsStatus={wsStatus}
               apiError={error}
-              onRetry={() => router.replace({ pathname: '/operator', params: { code: sessionCode } })}
+              onRetry={() =>
+                router.replace({ pathname: '/operator', params: { code: sessionCode } })
+              }
             />
 
             {/* Session code + recognizer toggle in one row */}
             <View className="flex-row items-center gap-2">
               <View className="flex-row items-center gap-2 bg-app-card rounded-[10px] px-3 py-2">
-                <Text className="text-[10px] text-app-tertiary font-bold tracking-[1px]">SESSION</Text>
-                <Text className="text-base text-app-text font-extrabold tracking-[3px]">{sessionCode}</Text>
+                <Text className="text-[10px] text-app-tertiary font-bold tracking-[1px]">
+                  SESSION
+                </Text>
+                <Text className="text-base text-app-text font-extrabold tracking-[3px]">
+                  {sessionCode}
+                </Text>
               </View>
               {Platform.OS === 'ios' && (
                 <View className="flex-1">
@@ -320,9 +350,7 @@ export default function OperatorScreen() {
             </View>
 
             {/* Cue banner */}
-            {activeCues.length > 0 && (
-              <CueBanner cues={activeCues} onDismiss={dismissCue} />
-            )}
+            {activeCues.length > 0 && <CueBanner cues={activeCues} onDismiss={dismissCue} />}
 
             {/* Script card — takes most of the remaining space */}
             <View className="flex-[3]">
@@ -348,7 +376,9 @@ export default function OperatorScreen() {
                 }`}
                 onPress={handleTogglePause}
               >
-                <Text className={`text-sm font-bold ${isPaused ? 'text-app-accent' : 'text-app-label'}`}>
+                <Text
+                  className={`text-sm font-bold ${isPaused ? 'text-app-accent' : 'text-app-label'}`}
+                >
                   {isPaused ? '▶ Resume' : '⏸ Pause'}
                 </Text>
               </Pressable>

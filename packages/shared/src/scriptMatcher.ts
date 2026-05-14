@@ -39,6 +39,20 @@ function wordOverlapScore(a: string, b: string): number {
   return overlap / Math.max(wordsA.length, wordsB.size);
 }
 
+function transcriptCandidates(normalized: string): string[] {
+  if (!normalized) return [];
+  const words = normalized.split(" ").filter(Boolean);
+  const candidates = [normalized];
+
+  const tailSizes = [12, 8, 6];
+  for (const size of tailSizes) {
+    if (words.length > size) {
+      candidates.push(words.slice(words.length - size).join(" "));
+    }
+  }
+  return candidates;
+}
+
 type LineCache = Array<{ norm: string; tgrams: Map<string, number> }>;
 
 function buildCache(lines: FlatLine[]): LineCache {
@@ -69,7 +83,8 @@ export function matchTranscriptToScript(
 ): number {
   if (!transcript.trim() || lines.length === 0) return -1;
   const normTranscript = normalizeText(transcript);
-  const inputGrams = trigrams(normTranscript);
+  const candidates = transcriptCandidates(normTranscript);
+  if (candidates.length === 0) return -1;
   const lineCache = getCache(lines);
 
   const start = Math.max(0, currentIdx);
@@ -80,10 +95,19 @@ export function matchTranscriptToScript(
   for (let i = start; i <= end; i++) {
     const entry = lineCache[i];
     if (!entry) continue;
-    const score =
-      inputGrams.size > 0 && entry.tgrams.size > 0
-        ? trigramSimilarity(normTranscript, entry.norm)
-        : wordOverlapScore(normTranscript, entry.norm);
+
+    let score = 0;
+    for (const candidate of candidates) {
+      const inputGrams = trigrams(candidate);
+      const candidateScore =
+        inputGrams.size > 0 && entry.tgrams.size > 0
+          ? trigramSimilarity(candidate, entry.norm)
+          : wordOverlapScore(candidate, entry.norm);
+      if (candidateScore > score) {
+        score = candidateScore;
+      }
+    }
+
     if (score > bestScore) {
       bestScore = score;
       bestIdx = i;

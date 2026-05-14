@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { setBackendUrl, resolveDefaultBackendUrl } from '@/lib/config';
+import { setBackendUrl, resolveDefaultBackendUrl, hasConfiguredBackendUrl } from '@/lib/config';
 
 const STORAGE_KEY = '@theatrico/settings';
 
@@ -13,6 +13,12 @@ export interface WhisperModelInfo {
   sizeLabel: string;
   estimatedSeconds: number;
 }
+
+export const WHISPER_VAD_MODEL: WhisperModelInfo = {
+  url: 'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin',
+  sizeLabel: '0.9 MB',
+  estimatedSeconds: 2,
+};
 
 export const WHISPER_MODEL_URLS: Record<WhisperModelSize, WhisperModelInfo> = {
   tiny: {
@@ -56,9 +62,9 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   backendUrl: resolveDefaultBackendUrl(),
   // Native SFSpeechRecognizer on iOS: ~100-300ms word-level streaming — right for cues.
-  // Whisper on Android: no native streaming equivalent; falls back to 2s slice inference.
+  // Whisper on Android: no native streaming equivalent; use a larger model and VAD for accuracy.
   recognizerPreference: Platform.OS === 'ios' ? 'native' : 'whisper',
-  whisperModelSize: 'tiny',
+  whisperModelSize: 'base',
   language: 'en',
 };
 
@@ -81,6 +87,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       try {
         const parsed = JSON.parse(raw) as Partial<Settings>;
         const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed };
+        // If the build/runtime config explicitly sets BACKEND_URL, treat it as authoritative.
+        if (hasConfiguredBackendUrl()) {
+          merged.backendUrl = DEFAULT_SETTINGS.backendUrl;
+        }
         // In dev mode, don't let a stale saved URL override the freshly derived
         // local server address. The user can still override it explicitly in Settings.
         if (__DEV__ && merged.backendUrl === 'https://theatrico.fly.dev') {
