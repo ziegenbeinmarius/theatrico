@@ -14,6 +14,12 @@ export interface WhisperModelInfo {
   estimatedSeconds: number;
 }
 
+export const WHISPER_VAD_MODEL: WhisperModelInfo = {
+  url: 'https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin',
+  sizeLabel: '0.9 MB',
+  estimatedSeconds: 2,
+};
+
 export const WHISPER_MODEL_URLS: Record<WhisperModelSize, WhisperModelInfo> = {
   tiny: {
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin',
@@ -56,9 +62,9 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   backendUrl: resolveDefaultBackendUrl(),
   // Native SFSpeechRecognizer on iOS: ~100-300ms word-level streaming — right for cues.
-  // Whisper on Android: no native streaming equivalent; falls back to 2s slice inference.
+  // Whisper on Android: no native streaming equivalent; use a larger model and VAD for accuracy.
   recognizerPreference: Platform.OS === 'ios' ? 'native' : 'whisper',
-  whisperModelSize: 'tiny',
+  whisperModelSize: 'base',
   language: 'en',
 };
 

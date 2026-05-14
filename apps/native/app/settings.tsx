@@ -181,7 +181,7 @@ export default function SettingsScreen() {
                   value: 'tiny' as WhisperModelSize,
                   label: 'Tiny — 75 MB (fastest, lower accuracy)',
                 },
-                { value: 'base' as WhisperModelSize, label: 'Base — 142 MB (balanced)' },
+                { value: 'base' as WhisperModelSize, label: 'Base — 142 MB (recommended)' },
                 {
                   value: 'small' as WhisperModelSize,
                   label: 'Small — 466 MB (slower, higher accuracy)',
