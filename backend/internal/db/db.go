@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS annotations (
 );
 CREATE INDEX IF NOT EXISTS idx_ann_script ON annotations(script_id);
 CREATE INDEX IF NOT EXISTS idx_ann_line   ON annotations(script_id, line_index);
+CREATE TABLE IF NOT EXISTS operators (
+	id            TEXT PRIMARY KEY,
+	username      TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // Open opens (or creates) a SQLite database at dsn, applies the shared schema,
@@ -42,6 +48,13 @@ func Open(dsn string) (*sql.DB, error) {
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
+	}
+	// SQLite with journal_mode=delete does not support concurrent writers;
+	// a single connection avoids SQLITE_BUSY errors from the default pool.
+	conn.SetMaxOpenConns(1)
+	if _, err := conn.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 	if _, err := conn.Exec(schema); err != nil {
 		conn.Close()

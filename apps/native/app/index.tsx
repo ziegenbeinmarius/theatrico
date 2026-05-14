@@ -1,14 +1,17 @@
-import { useReducer } from 'react';
+import { useEffect, useReducer } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/AuthContext';
 import { usePlays } from '@/hooks/usePlays';
+import { useSessions, useDeleteSession } from '@/hooks/useSessions';
 import { theatricoClient } from '@/services/api/theatricoClient';
 import type { Play } from '@/domain';
 
@@ -45,21 +48,40 @@ function useCreateSession(onSuccess: (code: string) => void) {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { data: plays, isLoading: playsLoading, error: playsError } = usePlays();
+  const { token, loading: authLoading } = useAuth();
+  const { data: plays, isLoading: playsLoading, error: playsError } = usePlays({ enabled: !!token });
   const { creating, error: createError, create } = useCreateSession(
     (code) => router.push({ pathname: '/operator', params: { code } }),
   );
   const [selectedPlayId, setSelectedPlayId] = useReducer((_: string | null, v: string | null) => v, null);
+  const { data: sessions, isLoading: sessionsLoading } = useSessions({ enabled: !!token });
+  const { mutate: deleteSession } = useDeleteSession();
+
+  useEffect(() => {
+    if (!authLoading && !token) {
+      router.replace('/login');
+    }
+  }, [authLoading, token, router]);
+
+  if (authLoading || !token) {
+    return (
+      <View className="flex-1 bg-app-dark items-center justify-center">
+        <ActivityIndicator color="#b31e35" size="large" />
+      </View>
+    );
+  }
 
   const selectedPlay = plays?.find((p) => p.id === selectedPlayId) ?? null;
 
   return (
-    <ScrollView
-      className="flex-1 bg-app-dark"
-      contentContainerClassName="flex-grow px-5 gap-5"
-      contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
-      keyboardShouldPersistTaps="handled"
-    >
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScrollView
+        className="flex-1 bg-app-dark"
+        contentContainerClassName="flex-grow px-5 gap-5"
+        contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
       <Text className="text-[42px] font-bold text-app-text text-center tracking-[2px]">
         Theatrico
       </Text>
@@ -135,23 +157,43 @@ export default function HomeScreen() {
             <Text className="text-white text-[15px] font-bold">Create Session →</Text>
           )}
         </Pressable>
+
+        {/* Active sessions */}
+        {sessionsLoading ? null : sessions && sessions.length > 0 ? (
+          <View className="gap-1.5">
+            <Text className="text-[12px] font-bold text-app-label uppercase tracking-[1px] mt-1">
+              Active Sessions
+            </Text>
+            {sessions.map((s) => (
+              <Pressable
+                key={s.join_code}
+                className="flex-row items-center rounded-[10px] bg-app-input px-3 py-2.5 gap-2"
+                onPress={() => router.push({ pathname: '/operator', params: { code: s.join_code } })}
+              >
+                <View className="flex-1">
+                  <Text className="text-[14px] font-semibold text-app-text" numberOfLines={1}>
+                    {s.script_title || s.script_id}
+                  </Text>
+                  <Text className="text-[12px] text-app-muted tracking-[2px]">{s.join_code}</Text>
+                </View>
+                <Pressable
+                  hitSlop={8}
+                  onPress={() =>
+                    Alert.alert('Delete Session', `Remove session ${s.join_code}?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: () => deleteSession(s.join_code) },
+                    ])
+                  }
+                >
+                  <Text className="text-app-accent text-[18px] font-bold">✕</Text>
+                </Pressable>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
 
-      {/* Audience section */}
-      <View className="bg-app-card rounded-2xl p-[18px] gap-3">
-        <Text className="text-[13px] font-bold text-app-label uppercase tracking-[1px]">
-          Audience
-        </Text>
-        <Text className="text-[13px] text-app-tertiary -mt-1.5">
-          Enter a session code or scan the QR code from the operator screen
-        </Text>
-        <Pressable
-          className="bg-app-accent rounded-xl py-[14px] items-center"
-          onPress={() => router.push('/join')}
-        >
-          <Text className="text-white text-[15px] font-bold">Join as Audience →</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </>
   );
 }

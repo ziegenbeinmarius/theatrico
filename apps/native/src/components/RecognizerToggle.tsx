@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
 
 interface Props {
   value: 'whisper' | 'native';
@@ -12,9 +12,14 @@ const OPTIONS: { label: string; value: 'whisper' | 'native' }[] = [
 ];
 
 export function RecognizerToggle({ value, onChange, disabled = false }: Props) {
+  // Native SFSpeechRecognizer is iOS-only
+  const options = Platform.OS === 'ios' ? OPTIONS : OPTIONS.filter((o) => o.value !== 'native');
+
+  if (options.length < 2) return null;
+
   return (
     <View className="flex-row bg-app-input rounded-[10px] p-[3px] gap-[3px]">
-      {OPTIONS.map((opt) => {
+      {options.map((opt) => {
         const isActive = value === opt.value;
 
         return (

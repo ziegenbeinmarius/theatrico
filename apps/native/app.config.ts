@@ -22,16 +22,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         'Theatrico uses the microphone to transcribe live speech for the script prompter.',
       NSSpeechRecognitionUsageDescription:
         'Theatrico uses speech recognition to follow along with dialogue and advance the script automatically.',
-      NSCameraUsageDescription:
-        'Theatrico uses the camera to scan session QR codes so audiences can join quickly.',
     },
   },
   android: {
-    adaptiveIcon: {
-      foregroundImage: './assets/adaptive-icon.png',
-      backgroundColor: '#130f12',
-    },
-    package: 'com.theatrico.app',
+    package: 'com.theatrico.native',
   },
   web: {
     bundler: 'metro',
@@ -43,23 +37,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-splash-screen',
     'expo-asset',
     [
-      'expo-build-properties',
-      {
-        android: {
-          ndkVersion: '24.0.8215888',
-          extraProguardRules: '-keep class com.rnwhisper.** { *; }',
-        },
-      },
-    ],
-    [
       'expo-audio',
       {
         microphonePermission: 'Allow Theatrico to access your microphone for live transcription.',
       },
-    ],
-    [
-      'expo-camera',
-      { cameraPermission: 'Allow Theatrico to access your camera to scan session QR codes.' },
     ],
   ],
   experiments: {

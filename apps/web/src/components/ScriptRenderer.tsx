@@ -268,10 +268,8 @@ export function ScriptRenderer({
     for (const act of script.acts) {
       for (const scene of act.scenes) {
         for (const line of scene.lines) {
-          if (!m.has(line.character)) {
-            let hash = 0;
-            for (const char of line.character) hash = char.charCodeAt(0) + ((hash << 5) - hash);
-            m.set(line.character, palette[Math.abs(hash) % palette.length]);
+          if (line.character && !m.has(line.character)) {
+            m.set(line.character, palette[m.size % palette.length]);
           }
         }
       }

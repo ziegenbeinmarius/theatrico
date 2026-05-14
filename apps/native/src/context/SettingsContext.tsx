@@ -86,6 +86,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         if (__DEV__ && merged.backendUrl === 'https://theatrico.fly.dev') {
           merged.backendUrl = DEFAULT_SETTINGS.backendUrl;
         }
+        // Native SFSpeechRecognizer is iOS-only; fall back if stored on Android
+        if (Platform.OS !== 'ios' && merged.recognizerPreference === 'native') {
+          merged.recognizerPreference = 'whisper';
+        }
         setSettings(merged);
         setBackendUrl(merged.backendUrl);
       } catch {}
