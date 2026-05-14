@@ -14,10 +14,23 @@ import {
 } from '@theatrico/shared';
 
 class TheatricoClient implements ITheatricoClient {
+  private token: string | null = null;
+
+  setToken(token: string | null) {
+    this.token = token;
+  }
+
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> | undefined),
+    };
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
     const res = await fetch(`${config.backendUrl}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
       ...init,
+      headers,
     });
 
     if (!res.ok) {
@@ -79,8 +92,13 @@ class TheatricoClient implements ITheatricoClient {
     // React Native FormData accepts { uri, name, type } as a blob-like object
     form.append('script', { uri, name: fileName, type: 'text/markdown' } as unknown as Blob);
     form.append('title', title);
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
     const res = await fetch(`${config.backendUrl}/api/scripts`, {
       method: 'POST',
+      headers,
       body: form,
     });
     if (!res.ok) {
@@ -91,8 +109,13 @@ class TheatricoClient implements ITheatricoClient {
   }
 
   async deleteScript(id: string): Promise<void> {
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
     const res = await fetch(`${config.backendUrl}/api/scripts/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers,
     });
     if (!res.ok) {
       const msg = (await res.text()).trim();
@@ -123,7 +146,14 @@ class TheatricoClient implements ITheatricoClient {
   }
 
   async deleteAnnotation(id: number): Promise<void> {
-    const res = await fetch(`${config.backendUrl}/api/annotations/${id}`, { method: 'DELETE' });
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const res = await fetch(`${config.backendUrl}/api/annotations/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
     if (!res.ok) {
       const msg = (await res.text()).trim();
       throw new Error(msg || `Delete failed: ${res.status}`);
@@ -131,4 +161,4 @@ class TheatricoClient implements ITheatricoClient {
   }
 }
 
-export const theatricoClient: ITheatricoClient = new TheatricoClient();
+export const theatricoClient = new TheatricoClient();

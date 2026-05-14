@@ -5,14 +5,17 @@ import { OperatorPage } from './pages/OperatorPage';
 import { QRPage } from './pages/QRPage';
 import { ScriptsPage } from './pages/ScriptsPage';
 import { ScriptEditorPage } from './pages/ScriptEditorPage';
+import { LoginPage } from './pages/LoginPage';
+import { RequireAuth } from './components/RequireAuth';
 
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<OperatorPage />} />
-        <Route path="/scripts" element={<ScriptsPage />} />
-        <Route path="/scripts/:id" element={<ScriptEditorPage />} />
+        <Route path="/" element={<RequireAuth><OperatorPage /></RequireAuth>} />
+        <Route path="/scripts" element={<RequireAuth><ScriptsPage /></RequireAuth>} />
+        <Route path="/scripts/:id" element={<RequireAuth><ScriptEditorPage /></RequireAuth>} />
+        <Route path="/login" element={<LoginPage />} />
         <Route path="/join" element={<JoinPage />} />
         <Route path="/join/:code" element={<JoinPage />} />
         <Route path="/script/:code" element={<ScriptView />} />

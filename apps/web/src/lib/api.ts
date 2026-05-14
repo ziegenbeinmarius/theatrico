@@ -80,3 +80,27 @@ export async function deleteAnnotation(id: number) {
     throw new Error(message || `Delete failed with ${response.status}`);
   }
 }
+
+export function login(username: string, password: string) {
+  return request<{ token: string }>('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function logout() {
+  const response = await fetch('/api/auth/logout', { method: 'POST' });
+  if (!response.ok && response.status !== 204) {
+    throw new Error(`Logout failed with ${response.status}`);
+  }
+}
+
+export async function checkAuth(): Promise<boolean> {
+  try {
+    await getScripts();
+    return true;
+  } catch {
+    return false;
+  }
+}

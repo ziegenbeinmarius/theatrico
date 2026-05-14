@@ -19,6 +19,7 @@ import (
 	"github.com/ziegenbeinmarius/theatrico/internal/annotation"
 	"github.com/ziegenbeinmarius/theatrico/internal/api"
 	"github.com/ziegenbeinmarius/theatrico/internal/audio"
+	"github.com/ziegenbeinmarius/theatrico/internal/auth"
 	"github.com/ziegenbeinmarius/theatrico/internal/db"
 	"github.com/ziegenbeinmarius/theatrico/internal/matcher"
 	"github.com/ziegenbeinmarius/theatrico/internal/recognizer"
@@ -47,6 +48,7 @@ type server struct {
 
 	matchersMu sync.Mutex
 	matchers   map[string]*matcher.Matcher // keyed by session ID
+	auth       *auth.Store
 }
 
 // sessionMatcher returns the matcher for the session, creating it if needed.
@@ -125,6 +127,24 @@ func main() {
 		log.Fatalf("open db: %v", err)
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET env var is required")
+	}
+	authStore := auth.NewStore(conn, jwtSecret)
+	operatorUsername := os.Getenv("OPERATOR_USERNAME")
+	if operatorUsername == "" {
+		operatorUsername = "operator"
+	}
+	operatorPassword := os.Getenv("OPERATOR_PASSWORD")
+	if operatorPassword == "" {
+		log.Fatal("OPERATOR_PASSWORD env var is required")
+	}
+	if err := authStore.Seed(operatorUsername, operatorPassword); err != nil {
+		log.Fatalf("seed operator: %v", err)
+	}
+	log.Printf("operator account ready: %s", operatorUsername)
+
 	scripts, err := script.NewSQLiteStore(conn, scriptsDir)
 	if err != nil {
 		log.Fatalf("load scripts: %v", err)
@@ -157,10 +177,13 @@ func main() {
 		matchThreshold: matchThreshold,
 		matchMaxJump:   matchMaxJump,
 		matchers:       make(map[string]*matcher.Matcher),
+		auth:           authStore,
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/scripts", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/auth/login", srv.handleLogin)
+	mux.HandleFunc("/api/auth/logout", srv.auth.RequireAuth(srv.handleLogout))
+	mux.HandleFunc("/api/scripts", srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			srv.handleListScripts(w, r)
@@ -169,8 +192,8 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-	mux.HandleFunc("/api/scripts/", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/api/scripts/", srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/api/scripts/")
 		if p == "" {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -202,8 +225,8 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-	mux.HandleFunc("/api/annotations/", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/api/annotations/", srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		raw := strings.TrimPrefix(r.URL.Path, "/api/annotations/")
 		if raw == "" {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -222,14 +245,14 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/api/sessions", srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		srv.handleCreateSession(w, r)
-	})
+	}))
 	mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 		parts := strings.SplitN(p, "/", 2)
@@ -241,10 +264,14 @@ func main() {
 				srv.handleWebSocket(w, r, code)
 				return
 			case "audio":
-				srv.handleAudioWS(w, r, code)
+				srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+					srv.handleAudioWS(w, r, code)
+				})(w, r)
 				return
 			case "operator":
-				srv.handleOperatorWS(w, r, code)
+				srv.auth.RequireAuth(func(w http.ResponseWriter, r *http.Request) {
+					srv.handleOperatorWS(w, r, code)
+				})(w, r)
 				return
 			case "simulate":
 				if r.Method == http.MethodPost {
@@ -599,6 +626,58 @@ func (s *server) handleDeleteScript(w http.ResponseWriter, r *http.Request, id s
 		http.Error(w, "script not found", http.StatusNotFound)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token string `json:"token"`
+}
+
+func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	token, err := s.auth.Login(req.Username, req.Password)
+	if err != nil {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    token,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   8 * 60 * 60,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(loginResponse{Token: token}) //nolint:errcheck
+}
+
+func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.CookieName,
+		Value:    "",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   -1,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

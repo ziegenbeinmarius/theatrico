@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS annotations (
 );
 CREATE INDEX IF NOT EXISTS idx_ann_script ON annotations(script_id);
 CREATE INDEX IF NOT EXISTS idx_ann_line   ON annotations(script_id, line_index);
+CREATE TABLE IF NOT EXISTS operators (
+	id            TEXT PRIMARY KEY,
+	username      TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 // Open opens (or creates) a SQLite database at dsn, applies the shared schema,
