@@ -3,9 +3,9 @@ package recognizer
 import "strings"
 
 const (
-	noSpeechThreshold          = 0.6
-	confidentNoSpeechThreshold = 0.35
-	lowLogprobThreshold        = -1.0
+	noSpeechThreshold          = 0.75
+	confidentNoSpeechThreshold = 0.45
+	lowLogprobThreshold        = -1.2
 	highCompressionThreshold   = 2.4
 )
 

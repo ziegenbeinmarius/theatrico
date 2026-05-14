@@ -47,7 +47,11 @@ export class WhisperRecognizer implements ISpeechRecognizer {
   private resultListeners: Set<(r: RecognitionResult) => void> = new Set();
   private errorListeners: Set<(e: Error) => void> = new Set();
   private whisperCtx: unknown = null;
-  private transcriber: { start: () => Promise<void>; stop: () => Promise<void>; release: () => Promise<void> } | null = null;
+  private transcriber: {
+    start: () => Promise<void>;
+    stop: () => Promise<void>;
+    release: () => Promise<void>;
+  } | null = null;
   private isRunning = false;
   private readonly modelOptions: WhisperModelOptions;
 
@@ -80,20 +84,21 @@ export class WhisperRecognizer implements ISpeechRecognizer {
       this.transcriber = new RealtimeTranscriber(
         { whisperContext: this.whisperCtx, audioStream },
         {
-          audioSliceSec: 2,
-          audioMinSec: 1,
+          // Avoid tiny slices that can produce repeated meta outputs like "[End of audio]".
+          audioSliceSec: 2.2,
+          audioMinSec: 1.0,
           initialPrompt: options.contextHint,
           transcribeOptions: {
             language: options.language,
             temperature: 0,
             beamSize: 1,
             bestOf: 1,
-            maxLen: 80,
           },
           vadOptions: {
-            threshold: 0.6,
-            minSpeechDurationMs: 200,
-            minSilenceDurationMs: 500,
+            // Tune for live stage audio: pick up softer speech while still segmenting reliably.
+            threshold: 0.42,
+            minSpeechDurationMs: 90,
+            minSilenceDurationMs: 260,
           },
           autoSliceOnSpeechEnd: true,
         },
@@ -101,7 +106,7 @@ export class WhisperRecognizer implements ISpeechRecognizer {
           onTranscribe: (event) => {
             if (!this.isRunning) return;
             const text = event.data?.result?.trim();
-            if (text) {
+            if (text && !this.isMetaTranscript(text)) {
               this.emitResult({ text, isFinal: !event.isCapturing });
             }
           },
@@ -187,7 +192,11 @@ export class WhisperRecognizer implements ISpeechRecognizer {
     } catch (error) {
       if (error instanceof Error) {
         const msg = error.message ?? '';
-        if (msg.includes('getConstants') || msg.includes('NativeModule') || msg.includes('Cannot find module')) {
+        if (
+          msg.includes('getConstants') ||
+          msg.includes('NativeModule') ||
+          msg.includes('Cannot find module')
+        ) {
           throw new Error(this.getWhisperUnavailableMessage());
         }
       }
@@ -236,5 +245,14 @@ export class WhisperRecognizer implements ISpeechRecognizer {
   } {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('expo-file-system/legacy') as ReturnType<typeof this.requireFileSystem>;
+  }
+
+  private isMetaTranscript(text: string): boolean {
+    const normalized = text
+      .toLowerCase()
+      .replace(/[\[\]().,!?:;"']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return normalized === 'end of audio' || normalized === 'end audio';
   }
 }

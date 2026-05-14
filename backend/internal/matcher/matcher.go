@@ -11,8 +11,8 @@ import (
 
 const (
 	DefaultWindowSize = 15
-	DefaultThreshold  = 0.35
-	DefaultMaxJump    = 4
+	DefaultThreshold  = 0.42
+	DefaultMaxJump    = 5
 )
 
 var nonAlpha = regexp.MustCompile(`[^a-z0-9 ]+`)
@@ -116,6 +116,10 @@ func (m *Matcher) Match(transcript string) *MatchResult {
 		return nil
 	}
 	norm := normalize(transcript)
+	candidates := transcriptCandidates(norm)
+	if len(candidates) == 0 {
+		return nil
+	}
 
 	m.mu.Lock()
 	cursor := m.cursor
@@ -133,13 +137,19 @@ func (m *Matcher) Match(transcript string) *MatchResult {
 	bestScore := -1.0
 	bestIdx := -1
 
-	inputGrams := trigrams(norm)
 	for i := cursor; i < end; i++ {
-		var score float64
-		if inputGrams != nil && m.normGrams[i] != nil {
-			score = trigramSimilarityPrecomputed(inputGrams, m.normGrams[i])
-		} else {
-			score = wordOverlap(norm, m.normTexts[i])
+		score := 0.0
+		for _, candidate := range candidates {
+			grams := trigrams(candidate)
+			var candidateScore float64
+			if grams != nil && m.normGrams[i] != nil {
+				candidateScore = trigramSimilarityPrecomputed(grams, m.normGrams[i])
+			} else {
+				candidateScore = wordOverlap(candidate, m.normTexts[i])
+			}
+			if candidateScore > score {
+				score = candidateScore
+			}
 		}
 		if score > bestScore {
 			bestScore = score
@@ -229,4 +239,18 @@ func wordOverlap(a, b string) float64 {
 		}
 	}
 	return float64(hits) / float64(len(wb))
+}
+
+func transcriptCandidates(norm string) []string {
+	if norm == "" {
+		return nil
+	}
+	words := strings.Fields(norm)
+	candidates := []string{norm}
+	for _, size := range []int{12, 8, 6} {
+		if len(words) > size {
+			candidates = append(candidates, strings.Join(words[len(words)-size:], " "))
+		}
+	}
+	return candidates
 }

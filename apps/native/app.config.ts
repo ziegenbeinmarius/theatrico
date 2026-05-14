@@ -26,6 +26,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'com.theatrico.native',
+    adaptiveIcon: {
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#130f12',
+    },
   },
   web: {
     bundler: 'metro',

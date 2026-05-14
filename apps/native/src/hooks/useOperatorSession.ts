@@ -5,6 +5,7 @@ import { theatricoClient } from '@/services/api/theatricoClient';
 import { createSessionWebSocket } from '@/services/api/websocket/SessionWebSocket';
 import { createOperatorWebSocket, type OperatorWebSocket } from '@/services/api/websocket/OperatorWebSocket';
 import { useSpeechRecognizerContext } from '@/context/SpeechRecognizerContext';
+import { useSettings } from '@/context/SettingsContext';
 import type {
   ISessionWebSocket,
   Play,
@@ -43,8 +44,11 @@ export interface UseOperatorSessionResult {
   moveNext: () => Promise<void>;
 }
 
+const MAX_MATCH_ADVANCE_LINES = 7;
+
 export function useOperatorSession(sessionCode: string): UseOperatorSessionResult {
   const { recognizer } = useSpeechRecognizerContext();
+  const { settings } = useSettings();
 
   const {
     data: session,
@@ -76,6 +80,10 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
   const sessionWsRef = useRef<ISessionWebSocket | null>(null);
   const operatorWsRef = useRef<OperatorWebSocket | null>(null);
   const transcriptCounterRef = useRef(0);
+  const lastAcceptedTranscriptRef = useRef<{ normalized: string; at: number }>({
+    normalized: '',
+    at: 0,
+  });
 
   // Refs so callbacks always see the latest values without stale closures
   const flatLinesRef = useRef<ReturnType<typeof flattenLines>>([]);
@@ -85,6 +93,36 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
   useEffect(() => {
     flatLinesRef.current = play ? flattenLines(play) : [];
   }, [play]);
+
+  const normalizeTranscript = useCallback((text: string) => {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, []);
+
+  const isHallucinatedTranscript = useCallback(
+    (text: string) => {
+      const normalized = normalizeTranscript(text);
+      if (!normalized) return true;
+      // Common non-script hallucinations from mobile recognizers/whisper.
+      if (
+        normalized === 'end playback' ||
+        normalized === 'playback' ||
+        normalized === 'thank you for watching' ||
+        normalized === 'thanks for watching'
+      ) {
+        return true;
+      }
+      const words = normalized.split(' ').filter(Boolean).length;
+      if (words <= 1 && normalized.length < 4) {
+        return true;
+      }
+      return false;
+    },
+    [normalizeTranscript],
+  );
 
   // Session + operator WebSocket connections
   useEffect(() => {
@@ -150,14 +188,24 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
   // Local transcription → match against script → advance position
   useEffect(() => {
     const unsub = recognizer.onResult((result) => {
+      if (isHallucinatedTranscript(result.text)) {
+        return;
+      }
+
       const id = String(++transcriptCounterRef.current);
       setTranscriptItems((prev) => {
         const lastItem = prev[prev.length - 1];
         const next = (() => {
           if (!result.isFinal && lastItem && !lastItem.isFinal) {
-            return [...prev.slice(0, -1), { id, text: result.text, isFinal: false, timestamp: Date.now() }];
+            return [
+              ...prev.slice(0, -1),
+              { id, text: result.text, isFinal: false, timestamp: Date.now() },
+            ];
           }
-          return [...prev, { id, text: result.text, isFinal: result.isFinal, timestamp: Date.now() }];
+          return [
+            ...prev,
+            { id, text: result.text, isFinal: result.isFinal, timestamp: Date.now() },
+          ];
         })();
         return next.length > 5 ? next.slice(-5) : next;
       });
@@ -169,10 +217,39 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
       const currentIdx = currentPositionRef.current
         ? findLineIndex(lines, currentPositionRef.current.lineId)
         : -1;
-      const matchIdx = matchTranscriptToScript(result.text, lines, Math.max(0, currentIdx));
-      if (matchIdx >= 0 && matchIdx > currentIdx) {
+
+      const normalized = normalizeTranscript(result.text);
+      const now = Date.now();
+      if (
+        normalized === lastAcceptedTranscriptRef.current.normalized &&
+        now - lastAcceptedTranscriptRef.current.at < 1200
+      ) {
+        return;
+      }
+
+      const words = normalized.split(' ').filter(Boolean).length;
+      const shouldAttemptMatch = result.isFinal || words >= 4 || normalized.length >= 24;
+      if (!shouldAttemptMatch) {
+        return;
+      }
+
+      const threshold = result.isFinal ? 0.46 : 0.58;
+      const windowSize = result.isFinal ? 14 : 10;
+      const matchIdx = matchTranscriptToScript(
+        result.text,
+        lines,
+        Math.max(0, currentIdx),
+        windowSize,
+        threshold,
+      );
+      if (
+        matchIdx >= 0 &&
+        matchIdx > currentIdx &&
+        matchIdx - currentIdx <= MAX_MATCH_ADVANCE_LINES
+      ) {
         const matched = lines[matchIdx];
         if (matched) {
+          lastAcceptedTranscriptRef.current = { normalized, at: now };
           currentPositionRef.current = matched.position; // update immediately to block duplicate fires
           setCurrentPosition(matched.position);
           operatorWsRef.current?.forcePosition(matchIdx);
@@ -180,7 +257,7 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
       }
     });
     return unsub;
-  }, [recognizer]);
+  }, [isHallucinatedTranscript, normalizeTranscript, recognizer]);
 
   const startRecording = useCallback(async () => {
     const { granted } = await requestRecordingPermissionsAsync();
@@ -192,11 +269,11 @@ export function useOperatorSession(sessionCode: string): UseOperatorSessionResul
     const currentIdx = currentPositionRef.current
       ? findLineIndex(lines, currentPositionRef.current.lineId)
       : 0;
-    const contextHint = buildContextHint(lines, currentIdx, 4);
+    const contextHint = buildContextHint(lines, currentIdx, 10);
 
-    await recognizer.start({ language: 'en', contextHint });
+    await recognizer.start({ language: settings.language, contextHint });
     setIsRecording(true);
-  }, [recognizer]);
+  }, [recognizer, settings.language]);
 
   const stopRecording = useCallback(async () => {
     setIsRecording(false);
