@@ -1,6 +1,28 @@
 import type { Annotation } from '@theatrico/shared';
 import { CreateSessionResponse, PlayDetail, PlayInfo, SessionInfo, SessionSummary } from '../types';
 
+type UnauthorizedListener = () => void;
+
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+function notifyUnauthorized() {
+  for (const listener of unauthorizedListeners) {
+    listener();
+  }
+}
+
+export function onUnauthorized(listener: UnauthorizedListener) {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const message = (await response.text()).trim();
+  return message || `Request failed with ${response.status}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: {
@@ -11,8 +33,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const message = (await response.text()).trim();
-    throw new Error(message || `Request failed with ${response.status}`);
+    if (response.status === 401 && path !== "/api/auth/login") {
+      notifyUnauthorized();
+    }
+    throw new Error(await readErrorMessage(response));
   }
 
   return response.json() as Promise<T>;
@@ -28,9 +52,11 @@ export function getSession(code: string) {
 
 export async function deleteSession(code: string) {
   const response = await fetch(`/api/sessions/${encodeURIComponent(code)}`, { method: 'DELETE' });
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
   if (!response.ok && response.status !== 204) {
-    const message = (await response.text()).trim();
-    throw new Error(message || `Delete failed with ${response.status}`);
+    throw new Error(await readErrorMessage(response));
   }
 }
 
@@ -59,9 +85,11 @@ export function uploadScript(file: File, title: string) {
 
 export async function deleteScript(id: string) {
   const response = await fetch(`/api/scripts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
   if (!response.ok) {
-    const message = (await response.text()).trim();
-    throw new Error(message || `Delete failed with ${response.status}`);
+    throw new Error(await readErrorMessage(response));
   }
 }
 
@@ -87,9 +115,11 @@ export function updateAnnotation(id: number, type: string, content: string) {
 
 export async function deleteAnnotation(id: number) {
   const response = await fetch(`/api/annotations/${id}`, { method: 'DELETE' });
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
   if (!response.ok) {
-    const message = (await response.text()).trim();
-    throw new Error(message || `Delete failed with ${response.status}`);
+    throw new Error(await readErrorMessage(response));
   }
 }
 
@@ -103,6 +133,9 @@ export function login(username: string, password: string) {
 
 export async function logout() {
   const response = await fetch('/api/auth/logout', { method: 'POST' });
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
   if (!response.ok && response.status !== 204) {
     throw new Error(`Logout failed with ${response.status}`);
   }

@@ -1,4 +1,5 @@
 import '../global.css';
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -10,7 +11,17 @@ import { config } from '@/lib/config';
 import { theatricoClient } from '@/services/api/theatricoClient';
 
 function TokenSyncer() {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
+
+  useEffect(() => {
+    theatricoClient.setUnauthorizedHandler(async () => {
+      await logout();
+    });
+    return () => {
+      theatricoClient.setUnauthorizedHandler(null);
+    };
+  }, [logout]);
+
   theatricoClient.setToken(token);
   return null;
 }

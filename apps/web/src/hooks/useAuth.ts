@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { checkAuth, login as apiLogin, logout as apiLogout } from '../lib/api';
+import {
+  checkAuth,
+  login as apiLogin,
+  logout as apiLogout,
+  onUnauthorized,
+} from "../lib/api";
 
 interface AuthState {
   checked: boolean;
@@ -11,6 +16,12 @@ export function useAuth() {
 
   useEffect(() => {
     checkAuth().then((ok) => setState({ checked: true, authenticated: ok }));
+  }, []);
+
+  useEffect(() => {
+    return onUnauthorized(() => {
+      setState({ checked: true, authenticated: false });
+    });
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {

@@ -22,11 +22,31 @@ interface SessionSummary {
   created_at: string;
 }
 
+type UnauthorizedHandler = () => void | Promise<void>;
+
 class TheatricoClient implements ITheatricoClient {
   private token: string | null = null;
+  private unauthorizedHandler: UnauthorizedHandler | null = null;
+  private unauthorizedInFlight = false;
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+    this.unauthorizedHandler = handler;
+  }
+
+  private async onUnauthorized(): Promise<void> {
+    if (!this.unauthorizedHandler || this.unauthorizedInFlight) {
+      return;
+    }
+    this.unauthorizedInFlight = true;
+    try {
+      await this.unauthorizedHandler();
+    } finally {
+      this.unauthorizedInFlight = false;
+    }
   }
 
   private authHeaders(): Record<string, string> {
@@ -40,6 +60,9 @@ class TheatricoClient implements ITheatricoClient {
       ...(init?.headers as Record<string, string> | undefined),
     };
     const res = await fetch(`${config.backendUrl}${path}`, { ...init, headers });
+    if (res.status === 401) {
+      await this.onUnauthorized();
+    }
     if (!res.ok) {
       throw new Error(`API ${init?.method ?? 'GET'} ${path} failed: ${res.status}`);
     }
@@ -52,6 +75,9 @@ class TheatricoClient implements ITheatricoClient {
       ...(init?.headers as Record<string, string> | undefined),
     };
     const res = await fetch(`${config.backendUrl}${path}`, { ...init, headers });
+    if (res.status === 401) {
+      await this.onUnauthorized();
+    }
     if (!res.ok && res.status !== 204) {
       const msg = await res.text().catch(() => '');
       throw new Error(msg || `API ${init?.method ?? 'DELETE'} ${path} failed: ${res.status}`);
@@ -115,6 +141,9 @@ class TheatricoClient implements ITheatricoClient {
       headers: this.authHeaders(),
       body: form,
     });
+    if (res.status === 401) {
+      await this.onUnauthorized();
+    }
     if (!res.ok) {
       const msg = (await res.text()).trim();
       throw new Error(msg || `Upload failed: ${res.status}`);
@@ -134,7 +163,12 @@ class TheatricoClient implements ITheatricoClient {
     return this.request<Annotation[]>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`);
   }
 
-  createAnnotation(scriptId: string, lineIndex: number, type: string, content: string): Promise<Annotation> {
+  createAnnotation(
+    scriptId: string,
+    lineIndex: number,
+    type: string,
+    content: string,
+  ): Promise<Annotation> {
     return this.request<Annotation>(`/api/scripts/${encodeURIComponent(scriptId)}/annotations`, {
       method: 'POST',
       body: JSON.stringify({ line_index: lineIndex, type, content }),
