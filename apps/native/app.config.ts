@@ -16,7 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.theatrico.native',
+    bundleIdentifier: 'com.theatrico.app',
     infoPlist: {
       NSMicrophoneUsageDescription:
         'Theatrico uses the microphone to transcribe live speech for the script prompter.',
@@ -25,7 +25,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   android: {
-    package: 'com.theatrico.native',
+    package: 'com.theatrico.app',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#130f12',
