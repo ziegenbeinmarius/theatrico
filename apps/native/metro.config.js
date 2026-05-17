@@ -7,13 +7,16 @@ const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch all files in the monorepo so Metro picks up shared packages
-config.watchFolders = [workspaceRoot];
+// Preserve Expo defaults, then add monorepo workspace root.
+config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
 
-// Resolve packages from both the app's node_modules and the monorepo root
+// Preserve Expo defaults, then add monorepo node_modules paths.
 config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, 'node_modules'),
-  path.resolve(workspaceRoot, 'node_modules'),
+  ...new Set([
+    ...(config.resolver.nodeModulesPaths ?? []),
+    path.resolve(projectRoot, 'node_modules'),
+    path.resolve(workspaceRoot, 'node_modules'),
+  ]),
 ];
 
 module.exports = withNativeWind(config, { input: './global.css' });
