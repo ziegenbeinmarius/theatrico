@@ -163,6 +163,7 @@ For local `expo run:*` commands, you can force the backend URL at build time:
 
 ```sh
 cd apps/native
+npx expo prebuild --platform ios --clean
 BACKEND_URL=https://theatrico.fly.dev npx expo run:ios --device
 BACKEND_URL=https://theatrico.fly.dev npx expo run:android --device
 ```
